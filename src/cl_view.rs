@@ -1,40 +1,49 @@
 use crate::view::*;
+use crate::model::{Model, Point};
+
 
 pub struct CLView {
-    board_size: usize,
+    model: Model
 }
 
-impl CLView {
-    pub fn make_cl_view(board_size: usize) -> Self {
+
+impl View for CLView {
+    fn make(model: Model) -> Self {
 	Self {
-	    board_size
+	    model
 	}
+    }
+
+    fn run(&mut self) {
+	let res = self.model.restart();
+	if let Err(s) = res {
+	    println!("Error at model restart: {s}");
+	}
+
+	self.display_init_msg("Wellcome to Go!");
+	self.draw_board();
     }
 }
 
-impl View for CLView {
+
+impl CLView {
     fn display_init_msg(&self, msg: &str) {
 	println!("{msg}");
     }
 
-    fn draw_board(&self, board: &Vec<Vec<Point>>) {
+    fn draw_board(&self) {
+	let board = self.model.get_board();
+	
 	for row in board.into_iter() {
 	    for p in row.into_iter() {
 		let sign = match p {
-		    Point::Black => '◯',
-		    Point::White => '⬤',
-		    Point::Empty => '+'
+		    Point::Black => "◯ ",
+		    Point::White => "⬤ ",
+		    Point::Empty => "+ "
 		};
 		print!("{sign}");
 	    }
 	    println!();
-	}
-    }
-
-    fn listen(&self, controller: &impl ControllerCallback) {
-	let res = controller.send_command(vec!["start"]);
-	if let Err(s) = res {
-	    println!("Error at controller callback: {s}");
 	}
     }
 }

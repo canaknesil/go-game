@@ -1,17 +1,8 @@
-#[derive(Clone)]
-pub enum Point {
-    Black,
-    White,
-    Empty
-}
+use crate::model::Model;
+
 
 pub trait View {
-    fn display_init_msg(&self, msg: &str);
-    fn draw_board(&self, board: &Vec<Vec<Point>>);
-    fn listen(&self, controller: &impl ControllerCallback);
+    fn make(model: Model) -> Self;
+    fn run(&mut self);
 }
 
-
-pub trait ControllerCallback {
-    fn send_command(&self, args: Vec<&str>) -> Result<(), &str>;
-}
