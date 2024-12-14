@@ -30,8 +30,8 @@ fn main() {
     };
 
     match view_type {
-	ViewType::CL => CLView::make(board_size).run(),
-	ViewType::Egui => EguiView::make(board_size).run()
+	ViewType::CL => CLView::make(board_size).unwrap().run(),
+	ViewType::Egui => EguiView::make(board_size).unwrap().run()
     }
 
     println!("Exiting Go.");

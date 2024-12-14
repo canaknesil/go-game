@@ -5,7 +5,7 @@ use eframe::egui;
 
 
 pub struct EguiView {
-    board_size: usize
+    model: Model
 }
 
 #[derive(PartialEq)]
@@ -16,36 +16,28 @@ enum Mode {
 
 
 impl View for EguiView {
-    fn make(board_size: usize) -> Self {
-	Self {
-	    board_size
-	}
+    fn make(board_size: usize) -> Result<Self, &'static str> {
+	let model = Model::make_model(board_size);
+	Ok(Self {
+	    model
+	})
     }
 
-    fn run(&mut self) {
-	let mut model = Model::make_model(self.board_size);
-	self.init_model(&mut model);
-	self.run_egui(model);
+    fn run(self) {
+	self.run_egui();
     }
 }
 
 
 impl EguiView {
-    fn init_model(&mut self, model: &mut Model) {
-	let res = model.restart();
-	if let Err(s) = res {
-	    println!("Error at model restart: {s}");
-	}
-    }
-
-    fn run_egui(&self, mut model: Model) {
+    fn run_egui(mut self) {
 	let options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default().with_inner_size([640.0, 480.0]),
             ..Default::default()
 	};
 
 	// View state
-	let mut mode = Mode::Setup;
+	let mut mode = Mode::Game;
 	let mut stone = Stone::Black;
 
 	eframe::run_simple_native("Go", options, move |ctx, _frame| {
@@ -54,7 +46,7 @@ impl EguiView {
 		ui.radio_value(&mut mode, Mode::Setup, "Setup");
 		ui.radio_value(&mut mode, Mode::Game, "Game");
 
-		let turn = model.get_turn();
+		let turn = self.model.get_turn();
 		match turn {
 		    Turn::Black => {
 			ui.label("Turn: Black");
@@ -67,7 +59,7 @@ impl EguiView {
 		match mode {
 		    Mode::Setup => {
 			if ui.add(egui::Button::new("Switch turn")).clicked() {
-			    let r = model.setup_switch_turn();
+			    let r = self.model.setup_switch_turn();
 			    if let Err(s) = r {
 				println!("Model setup_switch_turn unsuccessful! {s}");
 			    }
@@ -96,7 +88,7 @@ impl EguiView {
 		painter.rect_filled(square_a, 0.0, egui::Color32::from_rgb(225, 225, 130));
 		
 		// Create square B with a margin inside square A
-		let board_size = model.get_board_size();
+		let board_size = self.model.get_board_size();
 		let margin_cell_size_ratio = 0.8;
 		let cell_size = square_a.width() / (board_size as f32 - 1.0 + 2.0 * margin_cell_size_ratio);
 		let margin = cell_size * margin_cell_size_ratio;
@@ -123,10 +115,11 @@ impl EguiView {
 		}
 
 		// Draw stones
-		let board = model.get_board();
-		
-		for (col_idx, col) in board.iter().enumerate() {
-		    for (row_idx, point) in col.iter().enumerate() {
+		let board = self.model.get_board();
+
+		for col_idx in 0..board_size {
+		    for row_idx in 0..board_size {
+			let point = board.get(col_idx, row_idx).unwrap();
 			let stone_color = match point {
 			    Point::Black => Some(egui::Color32::from_rgb(0, 0, 0)), // Black stones
 			    Point::White => Some(egui::Color32::from_rgb(255, 255, 255)), // White stones
@@ -156,12 +149,17 @@ impl EguiView {
 			    let (x, y) = board_coordinates(pos, board_origin, cell_size);
 			    match mode {
 				Mode::Setup => {
-				    let r = model.setup_add_stone(x as usize, y as usize, stone);
+				    let r = self.model.setup_add_stone(x as usize, y as usize, stone);
 				    if let Err(s) = r {
 					println!("Model setup_add_stone unsuccessful! {s}");
 				    }
 				},
-				Mode::Game => ()
+				Mode::Game => {
+				    let r = self.model.make_move(x as usize, y as usize);
+				    if let Err(s) = r {
+					println!("Model make_move unsuccessful! {s}");
+				    }
+				}
 			    }
 			}
 		    }
@@ -170,7 +168,7 @@ impl EguiView {
 			    let (x, y) = board_coordinates(pos, board_origin, cell_size);
 			    match mode {
 				Mode::Setup => {
-				    let r = model.setup_remove_stone(x as usize, y as usize);
+				    let r = self.model.setup_remove_stone(x as usize, y as usize);
 				    if let Err(s) = r {
 					println!("Model setup_remove_stone unsuccessful! {s}");
 				    }

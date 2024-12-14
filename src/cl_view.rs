@@ -8,18 +8,14 @@ pub struct CLView {
 
 
 impl View for CLView {
-    fn make(board_size: usize) -> Self {
-	Self {
-	    model: Model::make_model(board_size)
-	}
+    fn make(board_size: usize) -> Result<Self, &'static str> {
+	let model = Model::make_model(board_size);
+	Ok(Self {
+	    model
+	})	
     }
 
-    fn run(&mut self) {
-	let res = self.model.restart();
-	if let Err(s) = res {
-	    println!("Error at model restart: {s}");
-	}
-
+    fn run(self) {
 	self.display_init_msg("Wellcome to Go!");
 	self.draw_board();
     }
@@ -33,9 +29,11 @@ impl CLView {
 
     fn draw_board(&self) {
 	let board = self.model.get_board();
-	
-	for row in board.into_iter() {
-	    for p in row.into_iter() {
+	let board_size = self.model.get_board_size();
+
+	for x in 0..board_size {
+	    for y in 0..board_size {
+		let p = board.get(x, y).unwrap();
 		let sign = match p {
 		    Point::Black => "◯ ",
 		    Point::White => "⬤ ",
