@@ -8,9 +8,9 @@ pub struct CLView {
 
 
 impl View for CLView {
-    fn make(model: Model) -> Self {
+    fn make(board_size: usize) -> Self {
 	Self {
-	    model
+	    model: Model::make_model(board_size)
 	}
     }
 

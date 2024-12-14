@@ -6,6 +6,7 @@ pub enum Point {
 }
 
 
+#[derive(Clone)]
 pub struct Model {
     board_size: usize,
     board: Vec<Vec<Point>>
@@ -22,6 +23,10 @@ impl Model {
 
     pub fn get_board(&self) -> &Vec<Vec<Point>> {
 	&self.board
+    }
+
+    pub fn get_board_size(&self) -> usize {
+	self.board_size
     }
 
     pub fn restart(&mut self) -> Result<(), &str> {

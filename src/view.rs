@@ -1,8 +1,5 @@
-use crate::model::Model;
-
-
 pub trait View {
-    fn make(model: Model) -> Self;
+    fn make(board_size: usize) -> Self;
     fn run(&mut self);
 }
 
