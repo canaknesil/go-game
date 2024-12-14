@@ -1,11 +1,17 @@
 use crate::view::*;
-use crate::model::{Model, Point};
+use crate::model::{Model, Point, Stone, Turn};
 use eframe::egui;
 
 
 
 pub struct EguiView {
     board_size: usize
+}
+
+#[derive(PartialEq)]
+enum Mode {
+    Setup,
+    Game
 }
 
 
@@ -32,13 +38,50 @@ impl EguiView {
 	}
     }
 
-    fn run_egui(&self, model: Model) {
+    fn run_egui(&self, mut model: Model) {
 	let options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default().with_inner_size([640.0, 480.0]),
             ..Default::default()
 	};
 
+	// View state
+	let mut mode = Mode::Setup;
+	let mut stone = Stone::Black;
+
 	eframe::run_simple_native("Go", options, move |ctx, _frame| {
+	    egui::SidePanel::left("side_panel").show(ctx, |ui| {
+		ui.label("Mode:");
+		ui.radio_value(&mut mode, Mode::Setup, "Setup");
+		ui.radio_value(&mut mode, Mode::Game, "Game");
+
+		let turn = model.get_turn();
+		match turn {
+		    Turn::Black => {
+			ui.label("Turn: Black");
+		    },
+		    Turn::White => {
+			ui.label("Turn: White");
+		    }
+		}
+
+		match mode {
+		    Mode::Setup => {
+			if ui.add(egui::Button::new("Switch turn")).clicked() {
+			    let r = model.setup_switch_turn();
+			    if let Err(s) = r {
+				println!("Model setup_switch_turn unsuccessful! {s}");
+			    }
+			}
+
+			ui.label("Put stone:");
+			ui.radio_value(&mut stone, Stone::Black, "Black");
+			ui.radio_value(&mut stone, Stone::White, "White");
+		    },
+		    Mode::Game => {
+		    }
+		}
+	    });
+	    
             egui::CentralPanel::default().show(ctx, |ui| {
 		//
 		// DRAW
@@ -58,6 +101,7 @@ impl EguiView {
 		let cell_size = square_a.width() / (board_size as f32 - 1.0 + 2.0 * margin_cell_size_ratio);
 		let margin = cell_size * margin_cell_size_ratio;
 		let square_b = square_a.shrink(margin);
+		let board_origin = square_b.left_top();
 
 		// Draw a Go board inside square B
 		let cell_size = square_b.width() / (board_size as f32 - 1.0);
@@ -81,8 +125,8 @@ impl EguiView {
 		// Draw stones
 		let board = model.get_board();
 		
-		for (row_idx, row) in board.iter().enumerate() {
-		    for (col_idx, point) in row.iter().enumerate() {
+		for (col_idx, col) in board.iter().enumerate() {
+		    for (row_idx, point) in col.iter().enumerate() {
 			let stone_color = match point {
 			    Point::Black => Some(egui::Color32::from_rgb(0, 0, 0)), // Black stones
 			    Point::White => Some(egui::Color32::from_rgb(255, 255, 255)), // White stones
@@ -105,14 +149,46 @@ impl EguiView {
 		// GET INPUT
 		//
 
-		// TODO
-
-		//
-		// UPDATE MODEL
-		//
-
-		// TODO
+		// Handle clicks
+		if ui.rect_contains_pointer(rect) {
+		    if ui.input(|i| i.pointer.primary_clicked()) {
+			if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+			    let (x, y) = board_coordinates(pos, board_origin, cell_size);
+			    match mode {
+				Mode::Setup => {
+				    let r = model.setup_add_stone(x as usize, y as usize, stone);
+				    if let Err(s) = r {
+					println!("Model setup_add_stone unsuccessful! {s}");
+				    }
+				},
+				Mode::Game => ()
+			    }
+			}
+		    }
+		    if ui.input(|i| i.pointer.secondary_clicked()) {
+			if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
+			    let (x, y) = board_coordinates(pos, board_origin, cell_size);
+			    match mode {
+				Mode::Setup => {
+				    let r = model.setup_remove_stone(x as usize, y as usize);
+				    if let Err(s) = r {
+					println!("Model setup_remove_stone unsuccessful! {s}");
+				    }
+				},
+				Mode::Game => ()
+			    }
+			}
+		    }
+		}
 	    });
 	}).unwrap();
     }
+}
+
+
+fn board_coordinates(pos: egui::Pos2, origin: egui::Pos2, cell_size: f32) -> (i32, i32) {
+    let pos = (pos - origin) / cell_size;
+    let x = pos.x.round() as i32;
+    let y = pos.y.round() as i32;
+    (x, y)
 }

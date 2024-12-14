@@ -18,7 +18,16 @@ fn main() {
     println!("Starting Go.");
 
     let board_size = 9;
-    let view_type = ViewType::Egui;
+    let view_type = "egui";
+
+    let view_type = match view_type {
+	"cl" => ViewType::CL,
+	"egui" => ViewType::Egui,
+	other => {
+	    println!("View type {other} is not supported. Selecting cl.");
+	    ViewType::CL
+	}
+    };
 
     match view_type {
 	ViewType::CL => CLView::make(board_size).run(),
