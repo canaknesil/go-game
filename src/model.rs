@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::iter::Rev;
 
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -20,27 +21,41 @@ pub enum Turn {
     White
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct Board {
     matrix: Vec<Vec<Point>>,
     size: usize
 }
 
 #[derive(Clone)]
+struct HistoryItem {
+    board: Board,
+}
+
+#[derive(Clone)]
+struct History {
+    items: Vec<HistoryItem>
+}
+
+#[derive(Clone)]
 pub struct Model {
     board: Board,
     turn: Turn,
+    history: History, // doesn't store the current board
+    black_captures: i32, // number of stones that black captured
+    white_captures: i32
 }
 
 
 impl Model {
     pub fn make_model(board_size: usize) -> Self {
-	let mut model = Self {
+	Self {
 	    board: Board::make_empty_board(board_size),
-	    turn: Turn::Black
-	};
-	let _ = model.restart();
-	model
+	    turn: Turn::Black,
+	    history: History::new(),
+	    black_captures: 0,
+	    white_captures: 0
+	}
     }
 
     pub fn get_board(&self) -> &Board {
@@ -55,13 +70,17 @@ impl Model {
 	self.turn
     }
 
-    pub fn restart(&mut self) -> Result<(), &str> {
-	self.board = Board::make_empty_board(self.board.size);
-	Ok(())
+    pub fn get_black_captures(&self) -> i32 {
+	self.black_captures
+    }
+
+    pub fn get_white_captures(&self) -> i32 {
+	self.white_captures
     }
 
     pub fn setup_switch_turn(&mut self) -> Result<(), &str> {
 	self.switch_turn();
+	self.reset_history_during_setup();
 	Ok(())
     }
 
@@ -73,11 +92,20 @@ impl Model {
     }
 
     pub fn setup_add_stone(&mut self, x: usize, y: usize, stone: Stone) -> Result<(), &str> {
-	self.board.add_stone(x, y, stone)
+	let r = self.board.add_stone(x, y, stone);
+	self.reset_history_during_setup();
+	r
     }
 
     pub fn setup_remove_stone(&mut self, x: usize, y: usize) -> Result<(), &str> {
-	self.board.remove_stone(x, y)
+	let r = self.board.remove_stone(x, y);
+	self.reset_history_during_setup();
+	r
+    }
+
+    fn reset_history_during_setup(&mut self) {
+	println!("Resetting history due to custom setup!");
+	self.history = History::new();
     }
 
     pub fn make_move(&mut self, x: usize, y: usize) -> Result<(), &'static str> {
@@ -88,13 +116,18 @@ impl Model {
 		Turn::Black => Point::Black,
 		Turn::White => Point::White
 	    })?;
-	    new_board.capture_stones(x, y)?;
+	    let captures = new_board.capture_stones(x, y)?;
 	    if new_board.is_suicide(x, y)? {
 		Err("Suicide!")
 	    } else if self.is_repetition(&new_board) {
 		Err("Repetition!")
 	    } else {
+		self.history.push(HistoryItem{board: self.board.clone()});
 		self.board = new_board.clone();
+		match self.turn {
+		    Turn::Black => { self.black_captures += captures; },
+		    Turn::White => { self.white_captures += captures; }
+		}
 		self.switch_turn();
 		Ok(())
 	    }
@@ -104,8 +137,27 @@ impl Model {
     }
 
     fn is_repetition(&self, board: &Board) -> bool {
-	// TODO: is_repetition
+	for item in self.history.in_reverse() {
+	    if item.board == *board {
+		return true;
+	    }
+	}
 	false
+    }
+
+    pub fn calculate_territory_score(&self) -> (i32, i32) {
+	// Japanese and Korean rules
+	// Count empty intersections
+	// Consider Seki
+	let (black, white, _neutral) = self.board.calculate_territory_score();
+	(black + self.black_captures, white + self.white_captures)
+    }
+
+    pub fn calculate_area_score(&self) -> (i32, i32) {
+	// Chinese rules
+	// Count stones on plus empty intersections
+	let (black, white) = self.board.calculate_area_score();
+	(black + self.black_captures, white + self.white_captures)
     }
 }
 
@@ -143,7 +195,7 @@ impl Board {
 	})
     }
 
-    fn capture_stones(&mut self, x: usize, y: usize) -> Result<(), &'static str> {
+    fn capture_stones(&mut self, x: usize, y: usize) -> Result<i32, &'static str> {
 	// (x, y) are coordinates of the last move.
 	let player_point = self.get(x, y)?;
 	if let Point::Empty = player_point {
@@ -153,11 +205,14 @@ impl Board {
 	let opponent_point = opposite(player_point).ok_or("Point of last move is empty!")?;
 
 	let neighbors = self.get_neighbors(x, y);
+	let mut captures: i32 = 0;
+	
 	for n in neighbors {
 	    if let Some((x, y)) = n {
 		if opponent_point == self.get(x, y)? {
 		    let (lib, group) = self.liberties(x, y)?;
 		    if lib == 0 {
+			captures += group.len() as i32;
 			for (x, y) in group {
 			    self.remove_stone(x, y)?;
 			}
@@ -166,7 +221,7 @@ impl Board {
 	    }
 	}
 
-	Ok(())
+	Ok(captures)
     }
 
     fn is_suicide(&self, x: usize, y: usize) -> Result<bool, &'static str> {	
@@ -187,38 +242,18 @@ impl Board {
 
 	let opponent_point = opposite(player_point).ok_or("Can't calculate liberties. Point is empty!")?;
 
-	let mut visited = vec![vec![false; self.size]; self.size];
-	let mut to_be_visited = VecDeque::new(); // Only players points are stored here.
-	to_be_visited.push_back((x, y));
-	let mut group = Vec::new();
+	let (group, perimeter) = self.spread(x, y)?;
+
 	let mut lib = 0;
-	
-	while !to_be_visited.is_empty() {
-	    if let Some((x, y)) = to_be_visited.pop_front() {
-		if !visited[x][y] { // this check is redundant but harmless
-		    visited[x][y] = true;
-		    group.push((x, y));
-		    let neighbors = self.get_neighbors(x, y);
-		    for n in neighbors {
-			if let Some((x, y)) = n {
-			    let p = self.get(x, y)?;
-			    let v = visited[x][y];
-			    if p == player_point {
-				if !v {
-				    to_be_visited.push_back((x, y));
-				}
-			    } else if p == opponent_point {
-				// do nothing
-			    } else {
-				if !v {
-				    visited[x][y] = true;
-				    lib += 1;
-				}
-			    }
-			}
-		    }
-		}
-	    }
+	for (x, y) in perimeter {
+	    let p = self.get(x, y)?;
+	    if p == opponent_point {
+		// do nothing
+	    } else if p == Point::Empty {
+		lib += 1;
+	    } else {
+		println!("Algorithm 'spread' returned a wrong typed perimeter point. This should not have happened.");
+	    }	    
 	}
 
 	Ok((lib, group))
@@ -232,7 +267,139 @@ impl Board {
 
 	[left, right, top, bottom]
     }
+
+    fn calculate_territory_score(&self) -> (i32, i32, i32) {
+	let (black, white, neutral) = self.count_territories();
+
+	// TODO: Consider Seki
+	println!("In the current implementation of territory scoring, Seki is not checked.");
+
+	(black, white, neutral)
+    }
+
+    fn calculate_area_score(&self) -> (i32, i32) {
+	let (black_stones, white_stones) = self.count_stones();
+	let (black_terr, white_terr, _neutral_terr) = self.count_territories();
+
+	(black_stones + black_terr, white_stones + white_terr)
+    }
+
+    fn count_stones(&self) -> (i32, i32) {
+	let mut black = 0;
+	let mut white = 0;
+	for x in 0..self.size {
+	    for y in 0..self.size {
+		match self.get(x, y).unwrap() {
+		    Point::Black => { black += 1; },
+		    Point::White => { white += 1; },
+		    Point::Empty => ()
+		}
+	    }
+	}
+	(black, white)
+    }
+
+    fn count_territories(&self) -> (i32, i32, i32) {
+	let mut visited = vec![vec![false; self.size]; self.size];
+	let mut black: u32 = 0;
+	let mut white: u32 = 0;
+	let mut neutral: u32 = 0;
+
+	for x in 0..self.size {
+	    for y in 0..self.size {
+		let p = self.get(x, y).unwrap();
+		if p == Point::Empty && !visited[x][y] {
+		    // Process a territory
+		    let (area, perimeter) = self.spread(x, y).unwrap();
+
+		    let territory = area.len() as u32;
+		    for (x, y) in area {
+			visited[x][y] = true;
+		    }
+		    
+		    let mut black_perimeter = 0;
+		    let mut white_perimeter = 0;
+		    for (x, y) in perimeter {
+			let p = self.get(x, y).unwrap();
+			match p {
+			    Point::Black => { black_perimeter += 1; },
+			    Point::White => { white_perimeter += 1; },
+			    Point::Empty => ()
+			}
+		    }
+		    
+		    if black_perimeter == 0 && white_perimeter == 0 {
+			neutral += territory;
+		    } else if black_perimeter > 0 && white_perimeter == 0 {
+			black += territory;
+		    } else if white_perimeter > 0 && black_perimeter == 0 {
+			white += territory;
+		    } else {
+			neutral += territory;
+		    }
+		}
+	    }
+	}
+	
+	(black as i32, white as i32, neutral as i32)
+    }
+
+    fn spread(&self, x: usize, y: usize) -> Result<(Vec<(usize, usize)>, Vec<(usize, usize)>), &'static str> {
+	let point = self.get(x, y)?;
+	
+	let mut visited = vec![vec![false; self.size]; self.size];
+	let mut to_be_visited = VecDeque::new(); // Only points of type that are being spread are stored here.
+	to_be_visited.push_back((x, y));
+	let mut area = Vec::new();
+	let mut perimeter = Vec::new();
+	
+	while !to_be_visited.is_empty() {
+	    if let Some((x, y)) = to_be_visited.pop_front() {
+	 	if !visited[x][y] { // this check is redundant but harmless
+		    visited[x][y] = true;
+		    area.push((x, y));
+		    let neighbors = self.get_neighbors(x, y);
+		    for n in neighbors {
+			if let Some((x, y)) = n {
+			    let p = self.get(x, y)?;
+			    let v = visited[x][y];
+			    if p == point {
+				if !v {
+				    to_be_visited.push_back((x, y));
+				}
+			    } else {
+				if !v {
+				    visited[x][y] = true;
+				    perimeter.push((x, y));
+				}
+			    }
+			}
+		    }
+		}
+	    }
+	}
+
+	Ok((area, perimeter))
+    }
 }
+
+
+impl History {
+    fn new() -> Self {
+	Self {
+	    items: Vec::new()
+	}
+    }
+
+    fn push(&mut self, item: HistoryItem) {
+	self.items.push(item);
+    }
+
+    fn in_reverse(&self) -> Rev<std::slice::Iter<'_, HistoryItem>> {
+	self.items.iter().rev()
+    }
+}
+
 
 fn opposite(point: Point) -> Option<Point> {
     match point {

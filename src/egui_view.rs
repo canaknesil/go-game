@@ -39,8 +39,14 @@ impl EguiView {
 	// View state
 	let mut mode = Mode::Game;
 	let mut stone = Stone::Black;
+	let mut black_territory_score = 0;
+	let mut white_territory_score = 0;
+	let mut black_area_score = 0;
+	let mut white_area_score = 0;
 
 	eframe::run_simple_native("Go", options, move |ctx, _frame| {
+	    // TODO: menu
+	    
 	    egui::SidePanel::left("side_panel").show(ctx, |ui| {
 		ui.label("Mode:");
 		ui.radio_value(&mut mode, Mode::Setup, "Setup");
@@ -70,6 +76,17 @@ impl EguiView {
 			ui.radio_value(&mut stone, Stone::White, "White");
 		    },
 		    Mode::Game => {
+			ui.label(format!("Black captures: {}", self.model.get_black_captures()));
+			ui.label(format!("White captures: {}", self.model.get_white_captures()));
+
+			if ui.add(egui::Button::new("Calculate score")).clicked() {
+			    (black_territory_score, white_territory_score) = self.model.calculate_territory_score();
+			    (black_area_score, white_area_score) = self.model.calculate_area_score();
+			}
+			ui.label(format!("Black territory score: {}", black_territory_score));
+			ui.label(format!("White territory score: {}", white_territory_score));
+			ui.label(format!("Black area score: {}", black_area_score));
+			ui.label(format!("White area score: {}", white_area_score));
 		    }
 		}
 	    });

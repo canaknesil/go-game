@@ -17,7 +17,7 @@ enum ViewType {
 fn main() {
     println!("Starting Go.");
 
-    let board_size = 9;
+    let board_size = 13;
     let view_type = "egui";
 
     let view_type = match view_type {
