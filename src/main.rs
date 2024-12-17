@@ -1,7 +1,8 @@
-mod model;
 mod view;
 mod cl_view;
 mod egui_view;
+mod model;
+mod gtp;
 
 use crate::view::View;
 use crate::cl_view::CLView;
