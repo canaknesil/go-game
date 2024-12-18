@@ -3,6 +3,7 @@ mod cl_view;
 mod egui_view;
 mod model;
 mod gtp;
+mod child_process_engine;
 
 use crate::view::View;
 use crate::cl_view::CLView;
