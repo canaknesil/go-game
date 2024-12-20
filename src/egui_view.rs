@@ -6,7 +6,6 @@ use eframe::egui;
 pub struct EguiView {
     workspaces: Vec<Workspace>,
     wspc: Option<usize>,
-    prev_wspc: Option<usize>,
 }
 
 struct Workspace {
@@ -15,6 +14,7 @@ struct Workspace {
     view_state: ViewState,
 }
 
+#[derive(Copy, Clone)]
 struct ViewState {
     mode: Mode,
     stone: Stone,
@@ -25,10 +25,23 @@ struct ViewState {
 }
 
 
-#[derive(PartialEq)]
+#[derive(Copy, Clone, PartialEq)]
 enum Mode {
     Setup,
     Game
+}
+
+
+impl Clone for Workspace {
+    fn clone(&self) -> Self {
+	let mut new_name = self.name.clone();
+	new_name.push_str("-Clone");
+	Self {
+	    name: new_name,
+	    model: self.model.clone(),
+	    view_state: self.view_state.clone(),
+	}
+    }
 }
 
 
@@ -56,7 +69,6 @@ impl View for EguiView {
 		view_state: ViewState::default(),
 	    }],
 	    wspc: Some(0),
-	    prev_wspc: None,
 	})
     }
 
@@ -69,18 +81,30 @@ impl View for EguiView {
 impl EguiView {
     fn new_workspace(&mut self) {
 	// TODO
+	// Setup new workspace with a pop up.
     }
 
     fn clone_workspace(&mut self) {
-	// TODO
+	if let Some(n) = self.wspc {
+	    let w = &self.workspaces[n];
+	    self.workspaces.insert(n+1, w.clone());
+	    self.wspc = Some(n + 1);
+	}
     }
     
-    fn change_workspace(&mut self, new_wspc: usize) {
-	// TODO
-    }
-
     fn quit_workspace(&mut self) {
-	// TODO
+	// TODO: Set and use prev_wspc
+	if let Some(n) = self.wspc {
+	    if self.workspaces.len() == 1 {
+		self.wspc = None;
+	    } else if n == 0 {
+		// do nothing
+	    } else {
+		self.wspc = Some(n - 1);
+	    }
+	    
+	    let _ = self.workspaces.remove(n);
+	}
     }
 
     fn get_workspace(&self) -> Option<&Workspace> {
@@ -114,15 +138,15 @@ impl EguiView {
 	};
 
 	// Moving self to the following closure.
-	eframe::run_simple_native("Go", options, move |ctx, frame| {
+	eframe::run_simple_native("Go", options, move |ctx, _frame| {
 	    // TODO: new workspace pop up selection UI
 	    // TODO: maybe no default workspace ???
 
 	    egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
 		egui::menu::bar(ui, |ui| {
-		    ui.menu_button("Go", |ui| {
+		    // ui.menu_button("Go", |ui| {
 			
-		    });
+		    // });
 		    ui.menu_button("Workspace", |ui| {
 			if ui.button("New workspace").clicked() {
 			    self.new_workspace();
@@ -142,7 +166,7 @@ impl EguiView {
 		    ui.label("Workspace:");
 		    for n in 0..self.workspaces.len() {
 			let name = self.workspaces[n].name.clone();
-			ui.radio_value(&mut self.wspc, Some(n), name);
+			ui.selectable_value(&mut self.wspc, Some(n), name);
 		    }
 		});
 	    });
