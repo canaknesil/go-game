@@ -230,7 +230,7 @@ impl EguiView {
 		    // DRAW BOARD
 		    //
 
-		    let board_info = self.get_model().map(|model| {
+		    if let Some(model) = self.get_model() {
 			// Assume a drawing canvas.
 			let board_size = model.get_board_size();
 			let margin_cell_size_ratio = 0.8;
@@ -318,16 +318,12 @@ impl EguiView {
 			    Turn::White => white_stone_color
 			};
 			painter.circle_filled(turn_stone_center, stone_radius, turn_stone_color);
-
-			(board_origin, cell_size)
-		    });
 			
-		    //
-		    // GET MOUSE INPUT
-		    //
-
-		    // Handle clicks
-		    if let Some((board_origin, cell_size)) = board_info {
+			//
+			// GET MOUSE INPUT
+			//
+			
+			// Handle clicks
 			if ui.rect_contains_pointer(rect) {
 			    if ui.input(|i| i.pointer.primary_clicked()) {
 				if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
