@@ -4,8 +4,25 @@ use eframe::egui;
 
 
 pub struct EguiView {
-    model: Model
+    workspaces: Vec<Workspace>,
+    wspc: usize,
 }
+
+struct Workspace {
+    name: String,
+    model: Model,
+    view_state: ViewState,
+}
+
+struct ViewState {
+    mode: Mode,
+    stone: Stone,
+    black_territory_score: i32,
+    white_territory_score: i32,
+    black_area_score: i32,
+    white_area_score: i32,
+}
+
 
 #[derive(PartialEq)]
 enum Mode {
@@ -14,11 +31,30 @@ enum Mode {
 }
 
 
+impl ViewState {
+    fn default() -> Self {
+	Self {
+	    mode: Mode::Game,
+	    stone: Stone::Black,
+	    black_territory_score: 0,
+	    white_territory_score: 0,
+	    black_area_score: 0,
+	    white_area_score: 0,
+	}
+    }
+}
+
+
 impl View for EguiView {
     fn make(board_size: usize) -> Result<Self, &'static str> {
 	let model = Model::make_model(board_size);
 	Ok(Self {
-	    model
+	    workspaces: vec![Workspace {
+		name: "Game".to_string(),
+		model: model,
+		view_state: ViewState::default(),
+	    }],
+	    wspc: 0,
 	})
     }
 
@@ -29,29 +65,51 @@ impl View for EguiView {
 
 
 impl EguiView {
+    fn get_model(&self) -> &Model {
+	&self.workspaces[self.wspc].model
+    }
+
+    fn get_model_mut(&mut self) -> &mut Model {
+	&mut self.workspaces[self.wspc].model
+    }
+
+    fn get_view_state(&self) -> &ViewState {
+	&self.workspaces[self.wspc].view_state
+    }
+
+    fn get_view_state_mut(&mut self) -> &mut ViewState {
+	&mut self.workspaces[self.wspc].view_state
+    }
+    
     fn run_egui(mut self) {
 	let options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default().with_inner_size([640.0, 480.0]),
             ..Default::default()
 	};
 
-	// View state
-	let mut mode = Mode::Game;
-	let mut stone = Stone::Black;
-	let mut black_territory_score = 0;
-	let mut white_territory_score = 0;
-	let mut black_area_score = 0;
-	let mut white_area_score = 0;
-
+	// Moving self to the following closure.
 	eframe::run_simple_native("Go", options, move |ctx, _frame| {
 	    // TODO: menu
+	    // TODO: new workspace pop up selection UI
+	    // TODO: maybe no default workspace ???
+
+	    egui::TopBottomPanel::top("my_panel").show(ctx, |ui| {
+		ui.horizontal(|ui| {
+		    ui.label("Workspace:");
+		    for n in 0..self.workspaces.len() {
+			let name = self.workspaces[self.wspc].name.clone();
+			ui.radio_value(&mut self.wspc, n, name);
+		    }
+		});
+	    });
 	    
 	    egui::SidePanel::left("side_panel").resizable(false).exact_width(200.0).show(ctx, |ui| {
 		ui.label("Mode:");
-		ui.radio_value(&mut mode, Mode::Setup, "Setup");
-		ui.radio_value(&mut mode, Mode::Game, "Game");
+		let mode = &mut self.get_view_state_mut().mode;
+		ui.radio_value(mode, Mode::Setup, "Setup");
+		ui.radio_value(mode, Mode::Game, "Game");
 
-		let turn = self.model.get_turn();
+		let turn = self.get_model().get_turn();
 		match turn {
 		    Turn::Black => {
 			ui.label("Turn: Black");
@@ -61,31 +119,36 @@ impl EguiView {
 		    }
 		}
 
-		match mode {
+		match self.get_view_state().mode {
 		    Mode::Setup => {
 			if ui.add(egui::Button::new("Switch turn")).clicked() {
-			    let r = self.model.setup_switch_turn();
+			    let r = self.get_model_mut().setup_switch_turn();
 			    if let Err(s) = r {
 				println!("Model setup_switch_turn unsuccessful! {s}");
 			    }
 			}
 
 			ui.label("Put stone:");
-			ui.radio_value(&mut stone, Stone::Black, "Black");
-			ui.radio_value(&mut stone, Stone::White, "White");
+			let stone = &mut self.get_view_state_mut().stone;
+			ui.radio_value(stone, Stone::Black, "Black");
+			ui.radio_value(stone, Stone::White, "White");
 		    },
 		    Mode::Game => {
-			ui.label(format!("Black captures: {}", self.model.get_black_captures()));
-			ui.label(format!("White captures: {}", self.model.get_white_captures()));
-
+			ui.label(format!("Black captures: {}", self.get_model().get_black_captures()));
+			ui.label(format!("White captures: {}", self.get_model().get_white_captures()));
+			
 			if ui.add(egui::Button::new("Calculate score")).clicked() {
-			    (black_territory_score, white_territory_score) = self.model.calculate_territory_score();
-			    (black_area_score, white_area_score) = self.model.calculate_area_score();
+			    (self.get_view_state_mut().black_territory_score, self.get_view_state_mut().white_territory_score) = self.get_model().calculate_territory_score();
+			    (self.get_view_state_mut().black_area_score, self.get_view_state_mut().white_area_score) = self.get_model().calculate_area_score();
 			}
-			ui.label(format!("Black territory score: {}", black_territory_score));
-			ui.label(format!("White territory score: {}", white_territory_score));
-			ui.label(format!("Black area score: {}", black_area_score));
-			ui.label(format!("White area score: {}", white_area_score));
+			ui.label(format!("Black territory score: {}", self.get_view_state().black_territory_score));
+			ui.label(format!("White territory score: {}", self.get_view_state().white_territory_score));
+			ui.label(format!("Black area score: {}", self.get_view_state().black_area_score));
+			ui.label(format!("White area score: {}", self.get_view_state().white_area_score));
+
+			if ui.add(egui::Button::new("Undo")).clicked() {
+			    let _ = self.get_model_mut().undo();
+			}
 		    }
 		}
 	    });
@@ -99,7 +162,7 @@ impl EguiView {
 		let rect = ui.max_rect();
 
 		// Assume a drawing canvas.
-		let board_size = self.model.get_board_size();
+		let board_size = self.get_model().get_board_size();
 		let margin_cell_size_ratio = 0.8;
 		let canvas_ratio = (board_size as f32 + 2.0 * margin_cell_size_ratio + 2.0) // Additional space of size cell_size on the right
 		    / (board_size as f32 + 2.0 * margin_cell_size_ratio);
@@ -152,7 +215,7 @@ impl EguiView {
 		}
 
 		// Draw stones
-		let board = self.model.get_board();
+		let board = self.get_model().get_board();
 		let stone_radius_ratio = 0.4; // 0.5 makes the stones touch
 		let stone_radius = cell_size * stone_radius_ratio;
 		let black_stone_color = egui::Color32::from_rgb(0, 0, 0);
@@ -178,7 +241,7 @@ impl EguiView {
 		}
 
 		// Draw area on the right of the board
-		let turn = self.model.get_turn();
+		let turn = self.get_model().get_turn();
 		let turn_stone_center = egui::Pos2::new(square_a.right() + cell_size, canvas.top() + canvas_height / 2.0);
 		let turn_stone_color = match turn {
 		    Turn::Black => black_stone_color,
@@ -195,15 +258,16 @@ impl EguiView {
 		    if ui.input(|i| i.pointer.primary_clicked()) {
 			if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
 			    let (x, y) = board_coordinates(pos, board_origin, cell_size);
-			    match mode {
+			    match self.get_view_state().mode {
 				Mode::Setup => {
-				    let r = self.model.setup_add_stone(x as usize, y as usize, stone);
+				    let stone = self.get_view_state().stone;
+				    let r = self.get_model_mut().setup_add_stone(x as usize, y as usize, stone);
 				    if let Err(s) = r {
 					println!("Model setup_add_stone unsuccessful! {s}");
 				    }
 				},
 				Mode::Game => {
-				    let r = self.model.make_move(x as usize, y as usize);
+				    let r = self.get_model_mut().make_move(x as usize, y as usize);
 				    if let Err(s) = r {
 					println!("Model make_move unsuccessful! {s}");
 				    }
@@ -214,9 +278,9 @@ impl EguiView {
 		    if ui.input(|i| i.pointer.secondary_clicked()) {
 			if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
 			    let (x, y) = board_coordinates(pos, board_origin, cell_size);
-			    match mode {
+			    match self.get_view_state().mode {
 				Mode::Setup => {
-				    let r = self.model.setup_remove_stone(x as usize, y as usize);
+				    let r = self.get_model_mut().setup_remove_stone(x as usize, y as usize);
 				    if let Err(s) = r {
 					println!("Model setup_remove_stone unsuccessful! {s}");
 				    }

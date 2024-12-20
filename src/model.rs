@@ -30,6 +30,8 @@ pub struct Board {
 #[derive(Clone)]
 struct HistoryItem {
     board: Board,
+    black_captures: i32,
+    white_captures: i32,
 }
 
 #[derive(Clone)]
@@ -122,7 +124,11 @@ impl Model {
 	    } else if self.is_repetition(&new_board) {
 		Err("Repetition!")
 	    } else {
-		self.history.push(HistoryItem{board: self.board.clone()});
+		self.history.push(HistoryItem {
+		    board: self.board.clone(),
+		    black_captures: self.black_captures,
+		    white_captures: self.white_captures,
+		});
 		self.board = new_board.clone();
 		match self.turn {
 		    Turn::Black => { self.black_captures += captures; },
@@ -158,6 +164,19 @@ impl Model {
 	// Count stones on plus empty intersections
 	let (black, white) = self.board.calculate_area_score();
 	(black + self.black_captures, white + self.white_captures)
+    }
+
+    pub fn undo(&mut self) -> bool {
+	match self.history.pop() {
+	    Some(item) => {
+		self.board = item.board;
+		self.black_captures = item.black_captures;
+		self.white_captures = item.white_captures;
+		self.switch_turn();
+		true
+	    },
+	    None => false
+	}
     }
 }
 
@@ -393,6 +412,10 @@ impl History {
 
     fn push(&mut self, item: HistoryItem) {
 	self.items.push(item);
+    }
+
+    fn pop(&mut self) -> Option<HistoryItem> {
+	self.items.pop()
     }
 
     fn in_reverse(&self) -> Rev<std::slice::Iter<'_, HistoryItem>> {
