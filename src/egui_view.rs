@@ -7,6 +7,13 @@ pub struct EguiView {
     workspaces: Vec<Workspace>,
     wspc: Option<usize>,
     mode: ViewMode,
+    new_workspace_setup: NewWorkspaceSetup,
+}
+
+struct Workspace {
+    name: String,
+    model: Model,
+    state: WorkspaceState,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -15,15 +22,14 @@ enum ViewMode {
     CreateWorkspace,
 }
 
-struct Workspace {
-    name: String,
-    model: Model,
-    view_state: ViewState,
+struct NewWorkspaceSetup {
+    board_size: usize,
+    count: usize,
 }
 
 #[derive(Copy, Clone)]
-struct ViewState {
-    mode: Mode,
+struct WorkspaceState {
+    mode: WorkspaceMode,
     stone: Stone,
     black_territory_score: i32,
     white_territory_score: i32,
@@ -33,7 +39,7 @@ struct ViewState {
 
 
 #[derive(Copy, Clone, PartialEq)]
-enum Mode { // workspace mode
+enum WorkspaceMode {
     Setup,
     Game
 }
@@ -46,16 +52,16 @@ impl Clone for Workspace {
 	Self {
 	    name: new_name,
 	    model: self.model.clone(),
-	    view_state: self.view_state.clone(),
+	    state: self.state.clone(),
 	}
     }
 }
 
 
-impl ViewState {
+impl WorkspaceState {
     fn default() -> Self {
 	Self {
-	    mode: Mode::Game,
+	    mode: WorkspaceMode::Game,
 	    stone: Stone::Black,
 	    black_territory_score: 0,
 	    white_territory_score: 0,
@@ -66,18 +72,26 @@ impl ViewState {
 }
 
 
+impl NewWorkspaceSetup {
+    fn default() -> Self {
+	Self {
+	    board_size: 13,
+	    count: 0,
+	}
+    }
+}
+
+
 impl View for EguiView {
     fn make(board_size: usize) -> Result<Self, &'static str> {
-	let model = Model::make_model(board_size);
-	Ok(Self {
-	    workspaces: vec![Workspace {
-		name: "Game".to_string(),
-		model: model,
-		view_state: ViewState::default(),
-	    }],
-	    wspc: Some(0),
+	let mut view = Self {
+	    workspaces: Vec::new(),
+	    wspc: None,
 	    mode: ViewMode::Workspace,
-	})
+	    new_workspace_setup: NewWorkspaceSetup::default(),
+	};
+	view.new_workspace();
+	Ok(view)
     }
 
     fn run(self) {
@@ -88,7 +102,20 @@ impl View for EguiView {
 
 impl EguiView {
     fn new_workspace(&mut self) {
-	self.mode = ViewMode::CreateWorkspace;
+	let model = Model::make_model(self.new_workspace_setup.board_size);
+	self.new_workspace_setup.count += 1;
+	let w = Workspace {
+	    name: format!("W{}", self.new_workspace_setup.count),
+	    model: model,
+	    state: WorkspaceState::default(),
+	};
+	if let Some(n) = self.wspc {
+	    self.workspaces.insert(n+1, w);
+	    self.wspc = Some(n + 1);
+	} else {
+	    self.workspaces.push(w);
+	    self.wspc = Some(0);
+	}
     }
 
     fn clone_workspace(&mut self) {
@@ -102,7 +129,6 @@ impl EguiView {
     }
     
     fn quit_workspace(&mut self) {
-	// TODO: Set and use prev_wspc
 	if let Some(n) = self.wspc {
 	    if self.workspaces.len() == 1 {
 		self.wspc = None;
@@ -134,12 +160,12 @@ impl EguiView {
 	self.get_workspace_mut().map(|w| &mut w.model)
     }
 
-    fn get_view_state(&self) -> Option<&ViewState> {
-	self.get_workspace().map(|w| &w.view_state)
+    fn get_workspace_state(&self) -> Option<&WorkspaceState> {
+	self.get_workspace().map(|w| &w.state)
     }
 
-    fn get_view_state_mut(&mut self) -> Option<&mut ViewState> {
-	self.get_workspace_mut().map(|w| &mut w.view_state)
+    fn get_workspace_state_mut(&mut self) -> Option<&mut WorkspaceState> {
+	self.get_workspace_mut().map(|w| &mut w.state)
     }
 
     fn run_egui(mut self) {
@@ -150,9 +176,6 @@ impl EguiView {
 
 	// Moving self to the following closure.
 	eframe::run_simple_native("Go", options, move |ctx, _frame| {
-	    // TODO: new workspace pop up selection UI
-	    // TODO: maybe no default workspace ???
-
 	    match self.mode {
 		ViewMode::Workspace => {
 		    if let Some(_) = self.wspc {
@@ -177,7 +200,7 @@ impl EguiView {
 		// });
 		ui.menu_button("Workspace", |ui| {
 		    if ui.button("New workspace").clicked() {
-			self.new_workspace();
+			self.mode = ViewMode::CreateWorkspace;
 			ui.close_menu();
 		    }
 		    if ui.button("Clone workspace").clicked() {
@@ -202,11 +225,11 @@ impl EguiView {
 
     fn draw_workspace_side_panel(&mut self, ctx: &egui::Context) {
 	egui::SidePanel::left("side_panel").resizable(false).exact_width(200.0).show(ctx, |ui| {
-	    if let Some(vs) = self.get_view_state_mut() {
-		let mode = &mut vs.mode;
+	    if let Some(state) = self.get_workspace_state_mut() {
+		let mode = &mut state.mode;
 		ui.label("Mode:");
-		ui.radio_value(mode, Mode::Setup, "Setup");
-		ui.radio_value(mode, Mode::Game, "Game");
+		ui.radio_value(mode, WorkspaceMode::Setup, "Setup");
+		ui.radio_value(mode, WorkspaceMode::Game, "Game");
 	    }
 
 	    if let Some(model) = self.get_model() {
@@ -220,9 +243,9 @@ impl EguiView {
 		}
 	    }
 
-	    if let Some(vs) = self.get_view_state() {
-		match vs.mode {
-		    Mode::Setup => {
+	    if let Some(state) = self.get_workspace_state() {
+		match state.mode {
+		    WorkspaceMode::Setup => {
 			if ui.add(egui::Button::new("Switch turn")).clicked() {
 			    if let Some(model) = self.get_model_mut() {
 				let r = model.setup_switch_turn();
@@ -232,14 +255,14 @@ impl EguiView {
 			    }
 			}
 
-			if let Some(vs) = self.get_view_state_mut() {
-			    let stone = &mut vs.stone;
+			if let Some(state) = self.get_workspace_state_mut() {
+			    let stone = &mut state.stone;
 			    ui.label("Put stone:");
 			    ui.radio_value(stone, Stone::Black, "Black");
 			    ui.radio_value(stone, Stone::White, "White");
 			}
 		    },
-		    Mode::Game => {
+		    WorkspaceMode::Game => {
 			if let Some(model) = self.get_model() {
 			    ui.label(format!("Black captures: {}", model.get_black_captures()));
 			    ui.label(format!("White captures: {}", model.get_white_captures()));
@@ -249,18 +272,18 @@ impl EguiView {
 			    if ui.add(egui::Button::new("Calculate score")).clicked() {
 				let (ts_black, ts_white) = w.model.calculate_territory_score();
 				let (as_black, as_white) = w.model.calculate_area_score();
-				w.view_state.black_territory_score = ts_black;
-				w.view_state.white_territory_score = ts_white;
-				w.view_state.black_area_score = as_black;
-				w.view_state.white_area_score = as_white;
+				w.state.black_territory_score = ts_black;
+				w.state.white_territory_score = ts_white;
+				w.state.black_area_score = as_black;
+				w.state.white_area_score = as_white;
 			    }
 			}
 
-			if let Some(vs) = self.get_view_state() {
-			    ui.label(format!("Black territory score: {}", vs.black_territory_score));
-			    ui.label(format!("White territory score: {}", vs.white_territory_score));
-			    ui.label(format!("Black area score: {}", vs.black_area_score));
-			    ui.label(format!("White area score: {}", vs.white_area_score));
+			if let Some(state) = self.get_workspace_state() {
+			    ui.label(format!("Black territory score: {}", state.black_territory_score));
+			    ui.label(format!("White territory score: {}", state.white_territory_score));
+			    ui.label(format!("Black area score: {}", state.black_area_score));
+			    ui.label(format!("White area score: {}", state.white_area_score));
 			}
 
 			if let Some(model) = self.get_model_mut() {
@@ -384,10 +407,10 @@ impl EguiView {
 		    if ui.input(|i| i.pointer.primary_clicked()) {
 			if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
 			    let (x, y) = board_coordinates(pos, board_origin, cell_size);
-			    if let Some(vs) = self.get_view_state() {
-				match vs.mode {
-				    Mode::Setup => {
-					let stone = vs.stone;
+			    if let Some(state) = self.get_workspace_state() {
+				match state.mode {
+				    WorkspaceMode::Setup => {
+					let stone = state.stone;
 					if let Some(model) = self.get_model_mut() {
 					    let r = model.setup_add_stone(x as usize, y as usize, stone);
 					    if let Err(s) = r {
@@ -395,7 +418,7 @@ impl EguiView {
 					    }
 					}
 				    },
-				    Mode::Game => {
+				    WorkspaceMode::Game => {
 					if let Some(model) = self.get_model_mut() {
 					    let r = model.make_move(x as usize, y as usize);
 					    if let Err(s) = r {
@@ -410,9 +433,9 @@ impl EguiView {
 		    if ui.input(|i| i.pointer.secondary_clicked()) {
 			if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
 			    let (x, y) = board_coordinates(pos, board_origin, cell_size);
-			    if let Some(vs) = self.get_view_state() {
-				match vs.mode {
-				    Mode::Setup => {
+			    if let Some(state) = self.get_workspace_state() {
+				match state.mode {
+				    WorkspaceMode::Setup => {
 					if let Some(model) = self.get_model_mut() {
 					    let r = model.setup_remove_stone(x as usize, y as usize);
 					    if let Err(s) = r {
@@ -420,7 +443,7 @@ impl EguiView {
 					    }
 					}
 				    },
-				    Mode::Game => ()
+				    WorkspaceMode::Game => ()
 				}
 			    }
 			}
@@ -431,11 +454,17 @@ impl EguiView {
     }
 
     fn draw_create_workspace_central_panel(&mut self, ctx: &egui::Context) {
-	// TODO: Configure new workspace
 	egui::CentralPanel::default().show(ctx, |ui| {
-	    if ui.add(egui::Button::new("Cancel")).clicked() {
-		self.mode = ViewMode::Workspace;
-	    }
+	    ui.add(egui::Slider::new(&mut self.new_workspace_setup.board_size, 5..=25).text("Board size"));
+	    ui.horizontal(|ui| {
+		if ui.add(egui::Button::new("Cancel")).clicked() {
+		    self.mode = ViewMode::Workspace;
+		}
+		if ui.add(egui::Button::new("Create workspace")).clicked() {
+		    self.new_workspace();
+		    self.mode = ViewMode::Workspace;
+		}
+	    });
 	});
     }
 }
