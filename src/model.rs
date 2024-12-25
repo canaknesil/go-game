@@ -2,23 +2,13 @@ use std::collections::VecDeque;
 use std::iter::Rev;
 
 
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum Point {
-    Black,
-    White,
-    Empty
-}
-
-#[derive(Copy, Clone, PartialEq)]
-pub enum Stone {
-    Black,
-    White
-}
-
-#[derive(Copy, Clone, PartialEq)]
-pub enum Turn {
-    Black,
-    White
+#[derive(Clone)]
+pub struct Model {
+    board: Board,
+    turn: Turn,
+    history: History, // doesn't store the current board
+    black_captures: i32, // number of stones that black captured
+    white_captures: i32
 }
 
 #[derive(Clone, PartialEq)]
@@ -39,13 +29,23 @@ struct History {
     items: Vec<HistoryItem>
 }
 
-#[derive(Clone)]
-pub struct Model {
-    board: Board,
-    turn: Turn,
-    history: History, // doesn't store the current board
-    black_captures: i32, // number of stones that black captured
-    white_captures: i32
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum Point {
+    Black,
+    White,
+    Empty
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub enum Stone {
+    Black,
+    White
+}
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum Turn {
+    Black,
+    White
 }
 
 
@@ -80,7 +80,7 @@ impl Model {
 	self.white_captures
     }
 
-    pub fn setup_switch_turn(&mut self) -> Result<(), &str> {
+    pub fn setup_switch_turn(&mut self) -> Result<(), String> {
 	self.switch_turn();
 	self.reset_history_during_setup();
 	Ok(())
@@ -93,13 +93,13 @@ impl Model {
 	};
     }
 
-    pub fn setup_add_stone(&mut self, x: usize, y: usize, stone: Stone) -> Result<(), &str> {
+    pub fn setup_add_stone(&mut self, x: usize, y: usize, stone: Stone) -> Result<(), String> {
 	let r = self.board.add_stone(x, y, stone);
 	self.reset_history_during_setup();
 	r
     }
 
-    pub fn setup_remove_stone(&mut self, x: usize, y: usize) -> Result<(), &str> {
+    pub fn setup_remove_stone(&mut self, x: usize, y: usize) -> Result<(), String> {
 	let r = self.board.remove_stone(x, y);
 	self.reset_history_during_setup();
 	r
@@ -110,7 +110,7 @@ impl Model {
 	self.history = History::new();
     }
 
-    pub fn make_move(&mut self, x: usize, y: usize) -> Result<(), &'static str> {
+    pub fn make_move(&mut self, x: usize, y: usize) -> Result<(), String> {
 	let point = self.board.get(x, y)?;
 	if point == Point::Empty {
 	    let mut new_board = self.board.clone();
@@ -120,9 +120,9 @@ impl Model {
 	    })?;
 	    let captures = new_board.capture_stones(x, y)?;
 	    if new_board.is_suicide(x, y)? {
-		Err("Suicide!")
+		Err("Suicide!".to_string())
 	    } else if self.is_repetition(&new_board) {
-		Err("Repetition!")
+		Err("Repetition!".to_string())
 	    } else {
 		self.history.push(HistoryItem {
 		    board: self.board.clone(),
@@ -138,8 +138,24 @@ impl Model {
 		Ok(())
 	    }
 	} else {
-	    Err("Point is not empty!")
+	    Err("Point is not empty!".to_string())
 	}
+    }
+
+    pub fn make_move_computer(&mut self) -> Result<(), String> {
+	// TODO: make_move_computer
+	println!("make_move_computer not implemented! Making random move.");
+	let size = self.get_board_size();
+	for x in 0..size {
+	    for y in 0..size {
+		if let Ok(point) = self.board.get(x, y) {
+		    if let Point::Empty = point {
+			return self.make_move(x, y).map_err(|s| s.to_string());
+		    }
+		}
+	    }
+	}
+	Err("No empty place on board!".to_string())
     }
 
     fn is_repetition(&self, board: &Board) -> bool {
@@ -178,6 +194,10 @@ impl Model {
 	    None => false
 	}
     }
+
+    pub fn get_move_count(&self) -> usize {
+	self.history.get_move_count()
+    }
 }
 
 
@@ -189,36 +209,36 @@ impl Board {
 	}
     }
 
-    pub fn get(&self, x: usize, y: usize) -> Result<Point, &'static str> {
+    pub fn get(&self, x: usize, y: usize) -> Result<Point, String> {
 	self.matrix
-	    .get(x).ok_or("Board index x out of range!")?
-	    .get(y).ok_or("Board index y out of range!").copied()
+	    .get(x).ok_or(format!("Board index {x} out of range!"))?
+	    .get(y).ok_or(format!("Board index {y} out of range!")).copied()
     }
 
-    fn set(&mut self, x: usize, y: usize, p: Point) -> Result<(), &'static str> {
+    fn set(&mut self, x: usize, y: usize, p: Point) -> Result<(), String> {
 	let r = self.matrix
-	    .get_mut(x).ok_or("Board index x out of range!")?
-	    .get_mut(y).ok_or("Board index y out of range!")?;
+	    .get_mut(x).ok_or(format!("Board index {x} out of range!"))?
+	    .get_mut(y).ok_or(format!("Board index {y} out of range!"))?;
 	*r = p;
 	Ok(())
     }
 
-    fn remove_stone(&mut self, x: usize, y: usize) -> Result<(), &'static str> {
+    fn remove_stone(&mut self, x: usize, y: usize) -> Result<(), String> {
 	self.set(x, y, Point::Empty)
     }
 
-    fn add_stone(&mut self, x: usize, y: usize, stone: Stone) -> Result<(), &'static str> {
+    fn add_stone(&mut self, x: usize, y: usize, stone: Stone) -> Result<(), String> {
 	self.set(x, y, match stone {
 	    Stone::Black => Point::Black,
 	    Stone::White => Point::White
 	})
     }
 
-    fn capture_stones(&mut self, x: usize, y: usize) -> Result<i32, &'static str> {
+    fn capture_stones(&mut self, x: usize, y: usize) -> Result<i32, String> {
 	// (x, y) are coordinates of the last move.
 	let player_point = self.get(x, y)?;
 	if let Point::Empty = player_point {
-	    return Err("Point of last move is empty!");
+	    return Err("Point of last move is empty!".to_string());
 	}
 
 	let opponent_point = opposite(player_point).ok_or("Point of last move is empty!")?;
@@ -243,20 +263,20 @@ impl Board {
 	Ok(captures)
     }
 
-    fn is_suicide(&self, x: usize, y: usize) -> Result<bool, &'static str> {	
+    fn is_suicide(&self, x: usize, y: usize) -> Result<bool, String> {	
 	let player_point = self.get(x, y)?;
 	if let Point::Empty = player_point {
-	    return Err("Can't check suicide. Point is empty!");
+	    return Err("Can't check suicide. Point is empty!".to_string());
 	}
 
 	let (lib, _group) = self.liberties(x, y)?;
 	Ok(lib == 0)
     }
 
-    fn liberties(&self, x: usize, y: usize) -> Result<(i32, Vec<(usize, usize)>), &'static str> {
+    fn liberties(&self, x: usize, y: usize) -> Result<(i32, Vec<(usize, usize)>), String> {
 	let player_point = self.get(x, y)?; // Here player is the one liberties are calculated for.
 	if let Point::Empty = player_point {
-	    return Err("Can't calculate liberties. Point is empty!");
+	    return Err("Can't calculate liberties. Point is empty!".to_string());
 	}
 
 	let opponent_point = opposite(player_point).ok_or("Can't calculate liberties. Point is empty!")?;
@@ -363,7 +383,7 @@ impl Board {
 	(black as i32, white as i32, neutral as i32)
     }
 
-    fn spread(&self, x: usize, y: usize) -> Result<(Vec<(usize, usize)>, Vec<(usize, usize)>), &'static str> {
+    fn spread(&self, x: usize, y: usize) -> Result<(Vec<(usize, usize)>, Vec<(usize, usize)>), String> {
 	let point = self.get(x, y)?;
 	
 	let mut visited = vec![vec![false; self.size]; self.size];
@@ -408,6 +428,10 @@ impl History {
 	Self {
 	    items: Vec::new()
 	}
+    }
+
+    fn get_move_count(&self) -> usize {
+	self.items.len()
     }
 
     fn push(&mut self, item: HistoryItem) {

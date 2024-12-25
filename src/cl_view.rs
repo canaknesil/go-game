@@ -8,7 +8,8 @@ pub struct CLView {
 
 
 impl View for CLView {
-    fn make(board_size: usize) -> Result<Self, &'static str> {
+    fn make() -> Result<Self, String> {
+	let board_size = 13;
 	let model = Model::make_model(board_size);
 	Ok(Self {
 	    model

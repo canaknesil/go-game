@@ -19,7 +19,6 @@ enum ViewType {
 fn main() {
     println!("Starting Go.");
 
-    let board_size = 13;
     let view_type = "egui";
 
     let view_type = match view_type {
@@ -32,8 +31,8 @@ fn main() {
     };
 
     match view_type {
-	ViewType::CL => CLView::make(board_size).unwrap().run(),
-	ViewType::Egui => EguiView::make(board_size).unwrap().run()
+	ViewType::CL => CLView::make().unwrap().run(),
+	ViewType::Egui => EguiView::make().unwrap().run()
     }
 
     println!("Exiting Go.");

@@ -13,7 +13,14 @@ pub struct EguiView {
 struct Workspace {
     name: String,
     model: Model,
-    state: WorkspaceState,
+    mode: WorkspaceMode,
+    game_mode: GameMode,
+    stone: Stone,
+    black_territory_score: i32,
+    white_territory_score: i32,
+    black_area_score: i32,
+    white_area_score: i32,
+    // TODO: Mark last move
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -25,23 +32,20 @@ enum ViewMode {
 struct NewWorkspaceSetup {
     board_size: usize,
     count: usize,
+    game_mode: GameMode,
 }
-
-#[derive(Copy, Clone)]
-struct WorkspaceState {
-    mode: WorkspaceMode,
-    stone: Stone,
-    black_territory_score: i32,
-    white_territory_score: i32,
-    black_area_score: i32,
-    white_area_score: i32,
-}
-
 
 #[derive(Copy, Clone, PartialEq)]
 enum WorkspaceMode {
     Setup,
-    Game
+    Game,
+    Analysis,
+}
+
+#[derive(Copy, Clone, PartialEq)]
+enum GameMode {
+    HumanVsHuman,
+    HumanVsComputer(Turn), // turn is the human's color
 }
 
 
@@ -49,24 +53,17 @@ impl Clone for Workspace {
     fn clone(&self) -> Self {
 	let mut new_name = self.name.clone();
 	new_name.push_str("-Clone");
+
 	Self {
 	    name: new_name,
 	    model: self.model.clone(),
-	    state: self.state.clone(),
-	}
-    }
-}
-
-
-impl WorkspaceState {
-    fn default() -> Self {
-	Self {
-	    mode: WorkspaceMode::Game,
-	    stone: Stone::Black,
-	    black_territory_score: 0,
-	    white_territory_score: 0,
-	    black_area_score: 0,
-	    white_area_score: 0,
+	    mode: self.mode,
+	    game_mode: self.game_mode,
+	    stone: self.stone,
+	    black_territory_score: self.black_territory_score,
+	    white_territory_score: self.white_territory_score,
+	    black_area_score: self.black_area_score,
+	    white_area_score: self.white_area_score,
 	}
     }
 }
@@ -77,20 +74,20 @@ impl NewWorkspaceSetup {
 	Self {
 	    board_size: 13,
 	    count: 0,
+	    game_mode: GameMode::HumanVsHuman,
 	}
     }
 }
 
 
 impl View for EguiView {
-    fn make(board_size: usize) -> Result<Self, &'static str> {
-	let mut view = Self {
+    fn make() -> Result<Self, String> {
+	let view = Self {
 	    workspaces: Vec::new(),
 	    wspc: None,
-	    mode: ViewMode::Workspace,
+	    mode: ViewMode::CreateWorkspace,
 	    new_workspace_setup: NewWorkspaceSetup::default(),
 	};
-	view.new_workspace();
 	Ok(view)
     }
 
@@ -102,13 +99,31 @@ impl View for EguiView {
 
 impl EguiView {
     fn new_workspace(&mut self) {
+	// Make the workspace
 	let model = Model::make_model(self.new_workspace_setup.board_size);
 	self.new_workspace_setup.count += 1;
-	let w = Workspace {
+
+	let mut w = Workspace {
 	    name: format!("W{}", self.new_workspace_setup.count),
 	    model: model,
-	    state: WorkspaceState::default(),
+	    mode: WorkspaceMode::Game,
+	    game_mode: self.new_workspace_setup.game_mode,
+	    stone: Stone::Black,
+	    black_territory_score: 0,
+	    white_territory_score: 0,
+	    black_area_score: 0,
+	    white_area_score: 0,
 	};
+
+	// If computer is black, make the first move.
+	if let GameMode::HumanVsComputer(Turn::White) = w.game_mode {
+	    let r = w.model.make_move_computer();
+	    if let Err(s) = r {
+		println!("Model make_move_computer unsuccessful! {s}");
+	    }
+	}
+
+	// Add the workspace to the view.
 	if let Some(n) = self.wspc {
 	    self.workspaces.insert(n+1, w);
 	    self.wspc = Some(n + 1);
@@ -160,14 +175,6 @@ impl EguiView {
 	self.get_workspace_mut().map(|w| &mut w.model)
     }
 
-    fn get_workspace_state(&self) -> Option<&WorkspaceState> {
-	self.get_workspace().map(|w| &w.state)
-    }
-
-    fn get_workspace_state_mut(&mut self) -> Option<&mut WorkspaceState> {
-	self.get_workspace_mut().map(|w| &mut w.state)
-    }
-
     fn run_egui(mut self) {
 	let options = eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default().with_inner_size([640.0, 480.0]),
@@ -176,16 +183,15 @@ impl EguiView {
 
 	// Moving self to the following closure.
 	eframe::run_simple_native("Go", options, move |ctx, _frame| {
+	    self.draw_top_panel(ctx);
 	    match self.mode {
 		ViewMode::Workspace => {
 		    if let Some(_) = self.wspc {
-			self.draw_top_panel(ctx);
 			self.draw_workspace_side_panel(ctx);
 			self.draw_workspace_central_panel(ctx);
 		    }
 		},
 		ViewMode::CreateWorkspace => {
-		    self.draw_top_panel(ctx);
 		    self.draw_create_workspace_central_panel(ctx);
 		},
 	    }
@@ -225,13 +231,17 @@ impl EguiView {
 
     fn draw_workspace_side_panel(&mut self, ctx: &egui::Context) {
 	egui::SidePanel::left("side_panel").resizable(false).exact_width(200.0).show(ctx, |ui| {
-	    if let Some(state) = self.get_workspace_state_mut() {
-		let mode = &mut state.mode;
+	    // Workspace mode selection
+	    if let Some(w) = self.get_workspace_mut() {
+		let mode = &mut w.mode;
 		ui.label("Mode:");
 		ui.radio_value(mode, WorkspaceMode::Setup, "Setup");
 		ui.radio_value(mode, WorkspaceMode::Game, "Game");
+		ui.radio_value(mode, WorkspaceMode::Analysis, "Analysis");
 	    }
+	    ui.separator();
 
+	    // Widgets common to all workspace modes
 	    if let Some(model) = self.get_model() {
 		match model.get_turn() {
 		    Turn::Black => {
@@ -241,62 +251,99 @@ impl EguiView {
 			ui.label("Turn: White");
 		    }
 		}
+
+		ui.label(format!("Black captures: {}", model.get_black_captures()));
+		ui.label(format!("White captures: {}", model.get_white_captures()));
 	    }
 
-	    if let Some(state) = self.get_workspace_state() {
-		match state.mode {
-		    WorkspaceMode::Setup => {
-			if ui.add(egui::Button::new("Switch turn")).clicked() {
-			    if let Some(model) = self.get_model_mut() {
-				let r = model.setup_switch_turn();
-				if let Err(s) = r {
-				    println!("Model setup_switch_turn unsuccessful! {s}");
-				}
-			    }
-			}
+	    if let Some(w) = self.get_workspace() {
+		let s = match w.game_mode {
+		    GameMode::HumanVsHuman => "Human vs. human",
+		    GameMode::HumanVsComputer(Turn::Black) => "Human (black) vs. computer (white)",
+		    GameMode::HumanVsComputer(Turn::White) => "Human (white) vs. computer (black)",
+		};
+		ui.label(s);
+	    }
+	    ui.separator();
 
-			if let Some(state) = self.get_workspace_state_mut() {
-			    let stone = &mut state.stone;
-			    ui.label("Put stone:");
-			    ui.radio_value(stone, Stone::Black, "Black");
-			    ui.radio_value(stone, Stone::White, "White");
-			}
-		    },
-		    WorkspaceMode::Game => {
-			if let Some(model) = self.get_model() {
-			    ui.label(format!("Black captures: {}", model.get_black_captures()));
-			    ui.label(format!("White captures: {}", model.get_white_captures()));
-			}
-
-			if let Some(w) = self.get_workspace_mut() {
-			    if ui.add(egui::Button::new("Calculate score")).clicked() {
-				let (ts_black, ts_white) = w.model.calculate_territory_score();
-				let (as_black, as_white) = w.model.calculate_area_score();
-				w.state.black_territory_score = ts_black;
-				w.state.white_territory_score = ts_white;
-				w.state.black_area_score = as_black;
-				w.state.white_area_score = as_white;
-			    }
-			}
-
-			if let Some(state) = self.get_workspace_state() {
-			    ui.label(format!("Black territory score: {}", state.black_territory_score));
-			    ui.label(format!("White territory score: {}", state.white_territory_score));
-			    ui.label(format!("Black area score: {}", state.black_area_score));
-			    ui.label(format!("White area score: {}", state.white_area_score));
-			}
-
+	    // Widgets specific to setup mode
+	    if let Some(w) = self.get_workspace() {
+		if let WorkspaceMode::Setup = w.mode {
+		    if ui.add(egui::Button::new("Switch turn")).clicked() {
 			if let Some(model) = self.get_model_mut() {
-			    if ui.add(egui::Button::new("Undo")).clicked() {
-				if !model.undo() {
-				    println!("Cannot undo! No history.");
-				}
+			    let r = model.setup_switch_turn();
+			    if let Err(s) = r {
+				println!("Model setup_switch_turn unsuccessful! {s}");
 			    }
 			}
 		    }
+		    
+		    if let Some(w) = self.get_workspace_mut() {
+			let stone = &mut w.stone;
+			ui.label("Put stone:");
+			ui.radio_value(stone, Stone::Black, "Black");
+			ui.radio_value(stone, Stone::White, "White");
+		    }
+		    
+		    // TODO: Setup captured stones
+		    ui.separator();
 		}
 	    }
-	    
+
+	    // Widgets common to game and analysis mode
+	    if let Some(w) = self.get_workspace() {
+		let game_mode = w.game_mode;
+		if let WorkspaceMode::Game | WorkspaceMode::Analysis = w.mode {
+		    // TODO: Pass and resign
+		    		    
+		    if let Some(model) = self.get_model_mut() {
+			if ui.add(egui::Button::new("Undo")).clicked() {
+			    match game_mode {
+				GameMode::HumanVsHuman => {
+				    if !model.undo() { println!("Cannot undo! No history."); }
+				},
+				GameMode::HumanVsComputer(Turn::Black) => {
+				    if !model.undo() { println!("Cannot undo! No history."); }
+				    if !model.undo() { println!("Cannot undo! No history."); }
+				}
+				GameMode::HumanVsComputer(Turn::White) => {
+				    if model.get_move_count() >= 2 {
+					model.undo();
+					model.undo();
+				    } else {
+					println!("Cannot undo! No history before computer's start.");
+				    }
+				},
+			    }
+			}
+		    }
+		    ui.separator();
+		}
+	    }
+
+	    // Widgets specific to analysis mode
+	    if let Some(w) = self.get_workspace() {
+		if let WorkspaceMode::Analysis = w.mode {
+		    if let Some(w) = self.get_workspace_mut() {
+			if ui.add(egui::Button::new("Calculate score")).clicked() {
+			    let (ts_black, ts_white) = w.model.calculate_territory_score();
+			    let (as_black, as_white) = w.model.calculate_area_score();
+			    w.black_territory_score = ts_black;
+			    w.white_territory_score = ts_white;
+			    w.black_area_score = as_black;
+			    w.white_area_score = as_white;
+			}
+		    }
+		    
+		    if let Some(w) = self.get_workspace() {
+			ui.label(format!("Black territory score: {}", w.black_territory_score));
+			ui.label(format!("White territory score: {}", w.white_territory_score));
+			ui.label(format!("Black area score: {}", w.black_area_score));
+			ui.label(format!("White area score: {}", w.white_area_score));
+		    }
+		    ui.separator();
+		}
+	    }
 	});
     }
 
@@ -341,31 +388,33 @@ impl EguiView {
 		
 		// Create square B with a margin inside square A
 		let margin = cell_size * margin_cell_size_ratio;
-		let square_b = square_a.shrink(margin);
-		let board_origin = square_b.left_top();
+		let square_b = square_a.shrink(margin); // the square that contains smaller squares whose centers are intersections
+		let board_origin = square_b.left_top(); // top left of the square of size cell_size whose center is the intersection
 
 		// Draw a Go board inside square B
-		let cell_size = square_b.width() / (board_size as f32 - 1.0);
-		
+		let top = square_b.top() + cell_size / 2.0;
+		let bottom = square_b.bottom() - cell_size / 2.0;
+		let left = square_b.left() + cell_size / 2.0;
+		let right = square_b.right() - cell_size / 2.0;
 		for i in 0..board_size {
 		    // Horizontal lines
-		    let y = square_b.top() + i as f32 * cell_size;
+		    let y = top + i as f32 * cell_size;
 		    painter.line_segment([
-			egui::Pos2::new(square_b.left(), y),
-			egui::Pos2::new(square_b.right(), y),
+			egui::Pos2::new(left, y),
+			egui::Pos2::new(right, y),
 		    ], egui::Stroke::new(1.0, egui::Color32::BLACK));
 		    
 		    // Vertical lines
-		    let x = square_b.left() + i as f32 * cell_size;
+		    let x = left + i as f32 * cell_size;
 		    painter.line_segment([
-			egui::Pos2::new(x, square_b.top()),
-			egui::Pos2::new(x, square_b.bottom()),
+			egui::Pos2::new(x, top),
+			egui::Pos2::new(x, bottom),
 		    ], egui::Stroke::new(1.0, egui::Color32::BLACK));
 		}
 
 		// Draw stones
 		let board = model.get_board();
-		let stone_radius_ratio = 0.4; // 0.5 makes the stones touch
+		let stone_radius_ratio = 0.45; // 0.5 makes the stones touch
 		let stone_radius = cell_size * stone_radius_ratio;
 		let black_stone_color = egui::Color32::from_rgb(0, 0, 0);
 		let white_stone_color = egui::Color32::from_rgb(255, 255, 255);
@@ -380,8 +429,8 @@ impl EguiView {
 			};
 
 			if let Some(color) = stone_color {
-			    let x = square_b.left() + col_idx as f32 * cell_size;
-			    let y = square_b.top() + row_idx as f32 * cell_size;
+			    let x = square_b.left() + cell_size / 2.0 + col_idx as f32 * cell_size;
+			    let y = square_b.top() + cell_size / 2.0 + row_idx as f32 * cell_size;
 
 			    let center = egui::Pos2::new(x, y);
 			    painter.circle_filled(center, stone_radius, color);
@@ -406,44 +455,24 @@ impl EguiView {
 		if ui.rect_contains_pointer(rect) {
 		    if ui.input(|i| i.pointer.primary_clicked()) {
 			if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
-			    let (x, y) = board_coordinates(pos, board_origin, cell_size);
-			    if let Some(state) = self.get_workspace_state() {
-				match state.mode {
-				    WorkspaceMode::Setup => {
-					let stone = state.stone;
-					if let Some(model) = self.get_model_mut() {
-					    let r = model.setup_add_stone(x as usize, y as usize, stone);
-					    if let Err(s) = r {
-						println!("Model setup_add_stone unsuccessful! {s}");
-					    }
-					}
-				    },
-				    WorkspaceMode::Game => {
-					if let Some(model) = self.get_model_mut() {
-					    let r = model.make_move(x as usize, y as usize);
-					    if let Err(s) = r {
-						println!("Model make_move unsuccessful! {s}");
-					    }
-					}
-				    }
+			    match board_coordinates(pos, board_origin, cell_size) {
+				Ok((x, y)) => {
+				    self.handle_left_click_board(x, y);
+				},
+				Err(s) => {
+				    println!("{s}");
 				}
 			    }
 			}
 		    }
 		    if ui.input(|i| i.pointer.secondary_clicked()) {
 			if let Some(pos) = ui.input(|i| i.pointer.interact_pos()) {
-			    let (x, y) = board_coordinates(pos, board_origin, cell_size);
-			    if let Some(state) = self.get_workspace_state() {
-				match state.mode {
-				    WorkspaceMode::Setup => {
-					if let Some(model) = self.get_model_mut() {
-					    let r = model.setup_remove_stone(x as usize, y as usize);
-					    if let Err(s) = r {
-						println!("Model setup_remove_stone unsuccessful! {s}");
-					    }
-					}
-				    },
-				    WorkspaceMode::Game => ()
+			    match board_coordinates(pos, board_origin, cell_size) {
+				Ok((x, y)) => {
+				    self.handle_right_click_board(x, y);
+				},
+				Err(s) => {
+				    println!("{s}");
 				}
 			    }
 			}
@@ -453,9 +482,74 @@ impl EguiView {
 	});
     }
 
+    fn handle_left_click_board(&mut self, x: usize, y: usize) {
+	if let Some(w) = self.get_workspace() {
+	    let game_mode = w.game_mode;
+	    match w.mode {
+		WorkspaceMode::Setup => {
+		    let stone = w.stone;
+		    if let Some(model) = self.get_model_mut() {
+			let r = model.setup_add_stone(x, y, stone);
+			if let Err(s) = r {
+			    println!("Model setup_add_stone unsuccessful! {s}");
+			}
+		    }
+		},
+		WorkspaceMode::Game => {
+		    if let Some(model) = self.get_model_mut() {
+			let r = model.make_move(x, y); // human move
+			match r {
+			    Ok(()) => {
+				if let GameMode::HumanVsComputer(turn) = game_mode {
+				    let model_turn = model.get_turn();
+				    if turn != model_turn {
+					let r = model.make_move_computer(); // computer move
+					if let Err(s) = r {
+					    println!("Model make_move_computer unsuccessful! {s}");
+					}
+				    } else {
+					println!("Game mode is HumanVsComputer({turn:?}). It's computer's turn but model returned {model_turn:?}. Computer will not make any move.");
+				    }
+				}
+			    },
+			    Err(s) => {
+				println!("Model make_move unsuccessful! {s}");
+			    }
+			}
+		    }
+		},
+		WorkspaceMode::Analysis => (), // TODO: mouse clicks during analysis
+	    }
+	}
+    }
+
+    fn handle_right_click_board(&mut self, x: usize, y: usize) {
+	if let Some(w) = self.get_workspace() {
+	    match w.mode {
+		WorkspaceMode::Setup => {
+		    if let Some(model) = self.get_model_mut() {
+			let r = model.setup_remove_stone(x, y);
+			if let Err(s) = r {
+			    println!("Model setup_remove_stone unsuccessful! {s}");
+			}
+		    }
+		},
+		WorkspaceMode::Game => (), // do nothing
+		WorkspaceMode::Analysis => (), // TODO: right click in analysis mode
+	    }
+	}
+    }
+
     fn draw_create_workspace_central_panel(&mut self, ctx: &egui::Context) {
 	egui::CentralPanel::default().show(ctx, |ui| {
-	    ui.add(egui::Slider::new(&mut self.new_workspace_setup.board_size, 5..=25).text("Board size"));
+	    ui.add(egui::Slider::new(&mut self.new_workspace_setup.board_size, 2..=25).text("Board size"));
+
+	    let game_mode = &mut self.new_workspace_setup.game_mode;
+	    ui.label("Game mode:");
+	    ui.radio_value(game_mode, GameMode::HumanVsHuman, "Human vs. human");
+	    ui.radio_value(game_mode, GameMode::HumanVsComputer(Turn::Black), "Human (black) vs. computer (white)");
+	    ui.radio_value(game_mode, GameMode::HumanVsComputer(Turn::White), "Human (white) vs. computer (black)");
+
 	    ui.horizontal(|ui| {
 		if ui.add(egui::Button::new("Cancel")).clicked() {
 		    self.mode = ViewMode::Workspace;
@@ -470,9 +564,15 @@ impl EguiView {
 }
 
 
-fn board_coordinates(pos: egui::Pos2, origin: egui::Pos2, cell_size: f32) -> (i32, i32) {
+fn board_coordinates(pos: egui::Pos2, origin: egui::Pos2, cell_size: f32) -> Result<(usize, usize), String> {
+    // Origin in the top left corner of the square of size cell_size
+    // whose center is the corner intersection.
     let pos = (pos - origin) / cell_size;
-    let x = pos.x.round() as i32;
-    let y = pos.y.round() as i32;
-    (x, y)
+    let x = pos.x.floor() as i32;
+    let y = pos.y.floor() as i32;
+    if x >= 0 && y >= 0 {
+	Ok((x as usize, y as usize))
+    } else {
+	Err(format!("Board coordinates ({x}, {y}) are calculated from egui position are negative!"))
+    }
 }
