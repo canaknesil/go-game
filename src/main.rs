@@ -7,8 +7,8 @@ mod katago_installer;
 
 use crate::cl_view::CLView;
 use crate::egui_view::EguiView;
-use std::path::Path;
-
+use dirs;
+    
 
 enum ViewType {
     CL,
@@ -16,11 +16,14 @@ enum ViewType {
 }
 
 
-fn main() {
+fn main() -> Result<(), String> {
+    // TODO: Consider std::error::Error for whole project, rather than String.
+
     println!("Starting Go.");
 
     // Setup directories to be used.
-    let katago_install_dir = Path::new("~/.cango/katago");
+    let katago_install_dir = dirs::home_dir().ok_or("Error at home_dir function!".to_string())?
+	.join(".cango").join("katago");
     
 
     // Start view.
@@ -37,8 +40,9 @@ fn main() {
 
     match view_type {
 	ViewType::CL => CLView::make().unwrap().run(),
-	ViewType::Egui => EguiView::make(katago_install_dir).unwrap().run()
+	ViewType::Egui => EguiView::make(&katago_install_dir).unwrap().run()
     }
 
     println!("Exiting Go.");
+    Ok(())
 }
