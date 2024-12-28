@@ -1,6 +1,9 @@
-use crate::view::*;
 use crate::model::{Model, Point, Stone, Turn};
+use crate::katago_installer::*;
 use eframe::egui;
+use std::path::Path;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 
 pub struct EguiView {
@@ -8,6 +11,11 @@ pub struct EguiView {
     wspc: Option<usize>,
     mode: ViewMode,
     new_workspace_setup: NewWorkspaceSetup,
+    katago_installer: KataGoInstaller,
+    // KataGo installer is internally protected from mutual
+    // execution. The view provides a second layer of protection for
+    // its own purposes.
+    katago_installer_status: Arc<Mutex<KataGoInstallerStatus>>,
 }
 
 struct Workspace {
@@ -23,10 +31,17 @@ struct Workspace {
     // TODO: Mark last move
 }
 
+struct KataGoInstallerStatus {
+    is_installed: Option<bool>,
+    is_operational: Option<bool>,
+    is_tuned: Option<bool>,
+}
+
 #[derive(Copy, Clone, PartialEq)]
 enum ViewMode {
     Workspace,
     CreateWorkspace,
+    InstallEngine,
 }
 
 struct NewWorkspaceSetup {
@@ -80,24 +95,30 @@ impl NewWorkspaceSetup {
 }
 
 
-impl View for EguiView {
-    fn make() -> Result<Self, String> {
+impl EguiView {
+    pub fn make(katago_install_dir: &Path) -> Result<Self, String> {
+	let katago_installer = KataGoInstaller::new(katago_install_dir);
+	let katago_installer_status = KataGoInstallerStatus {
+	    is_installed: Some(katago_installer.is_installed()),
+	    is_operational: None, // Checking this probably takes several seconds, not doing here.
+	    is_tuned: Some(katago_installer.is_tuned()),
+	};
+
 	let view = Self {
 	    workspaces: Vec::new(),
 	    wspc: None,
 	    mode: ViewMode::CreateWorkspace,
 	    new_workspace_setup: NewWorkspaceSetup::default(),
+	    katago_installer: katago_installer,
+	    katago_installer_status: Arc::new(Mutex::new(katago_installer_status)),
 	};
 	Ok(view)
     }
 
-    fn run(self) {
+    pub fn run(self) {
 	self.run_egui();
     }
-}
 
-
-impl EguiView {
     fn new_workspace(&mut self) {
 	// Make the workspace
 	let model = Model::make_model(self.new_workspace_setup.board_size);
@@ -194,6 +215,9 @@ impl EguiView {
 		ViewMode::CreateWorkspace => {
 		    self.draw_create_workspace_central_panel(ctx);
 		},
+		ViewMode::InstallEngine => {
+		    self.draw_install_engine_central_panel(ctx);
+		},
 	    }
 	}).unwrap();
     }
@@ -218,6 +242,12 @@ impl EguiView {
 			ui.close_menu();
 		    }
 		});
+		ui.menu_button("Engine", |ui| {
+		    if ui.button("Setup engine").clicked() {
+			self.mode = ViewMode::InstallEngine;
+			ui.close_menu();
+		    }
+		});
 	    });
 	    ui.horizontal(|ui| {
 		ui.label("Workspace:");
@@ -230,6 +260,7 @@ impl EguiView {
     }
 
     fn draw_workspace_side_panel(&mut self, ctx: &egui::Context) {
+	// TODO: Don't provide some analysis features and human-vs-computer features if engine is not setup.
 	egui::SidePanel::left("side_panel").resizable(false).exact_width(200.0).show(ctx, |ui| {
 	    // Workspace mode selection
 	    if let Some(w) = self.get_workspace_mut() {
@@ -269,7 +300,7 @@ impl EguiView {
 	    // Widgets specific to setup mode
 	    if let Some(w) = self.get_workspace() {
 		if let WorkspaceMode::Setup = w.mode {
-		    if ui.add(egui::Button::new("Switch turn")).clicked() {
+		    if ui.button("Switch turn").clicked() {
 			if let Some(model) = self.get_model_mut() {
 			    let r = model.setup_switch_turn();
 			    if let Err(s) = r {
@@ -297,7 +328,7 @@ impl EguiView {
 		    // TODO: Pass and resign
 		    		    
 		    if let Some(model) = self.get_model_mut() {
-			if ui.add(egui::Button::new("Undo")).clicked() {
+			if ui.button("Undo").clicked() {
 			    match game_mode {
 				GameMode::HumanVsHuman => {
 				    if !model.undo() { println!("Cannot undo! No history."); }
@@ -325,7 +356,7 @@ impl EguiView {
 	    if let Some(w) = self.get_workspace() {
 		if let WorkspaceMode::Analysis = w.mode {
 		    if let Some(w) = self.get_workspace_mut() {
-			if ui.add(egui::Button::new("Calculate score")).clicked() {
+			if ui.button("Calculate score").clicked() {
 			    let (ts_black, ts_white) = w.model.calculate_territory_score();
 			    let (as_black, as_white) = w.model.calculate_area_score();
 			    w.black_territory_score = ts_black;
@@ -541,6 +572,7 @@ impl EguiView {
     }
 
     fn draw_create_workspace_central_panel(&mut self, ctx: &egui::Context) {
+	// TODO: Don't provide some analysis features and human-vs-computer features if engine is not setup.
 	egui::CentralPanel::default().show(ctx, |ui| {
 	    ui.add(egui::Slider::new(&mut self.new_workspace_setup.board_size, 2..=25).text("Board size"));
 
@@ -551,14 +583,108 @@ impl EguiView {
 	    ui.radio_value(game_mode, GameMode::HumanVsComputer(Turn::White), "Human (white) vs. computer (black)");
 
 	    ui.horizontal(|ui| {
-		if ui.add(egui::Button::new("Cancel")).clicked() {
+		if ui.button("Cancel").clicked() {
 		    self.mode = ViewMode::Workspace;
 		}
-		if ui.add(egui::Button::new("Create workspace")).clicked() {
+		if ui.button("Create workspace").clicked() {
 		    self.new_workspace();
 		    self.mode = ViewMode::Workspace;
 		}
 	    });
+	});
+    }
+
+    fn draw_install_engine_central_panel(&mut self, ctx: &egui::Context) {
+	egui::CentralPanel::default().show(ctx, |ui| {
+	    // TODO: Custom engine setup via command, save the command to config file
+
+	    let mutex = &self.katago_installer_status;
+
+	    // Status information
+	    let mut installation_status_str = String::from("KataGo installation status: ");
+	    let mut tuning_status_str = String::from("KataGo tuning status: ");
+	    if let Ok(status) = mutex.try_lock() {
+		match status.is_installed {
+		    Some(true) => { installation_status_str.push_str("installed"); },
+		    Some(false) => { installation_status_str.push_str("not installed"); },
+		    None => { installation_status_str.push_str("not known"); },
+		}
+		match status.is_tuned {
+		    Some(true) => { tuning_status_str.push_str("tuned"); },
+		    Some(false) => { tuning_status_str.push_str("not tuned"); },
+		    None => { tuning_status_str.push_str("not known"); },
+		}
+	    } else {
+		installation_status_str.push_str("not known");
+		tuning_status_str.push_str("not known");
+	    }
+	    ui.label(installation_status_str);
+	    ui.label(tuning_status_str);
+
+	    // Buttons
+	    ui.horizontal(|ui| {
+		if let Ok(_status) = mutex.try_lock() {
+		    // Install button
+		    if ui.button("(Re)Install").clicked() {
+			self.do_katago_installer_op(|installer, status| {
+			    match installer.install() {
+				Ok(()) => {
+				    status.is_installed = Some(true);
+				},
+				Err(s) => {
+				    status.is_installed = Some(false);
+				    println!("KataGo installation unsuccessful! {s}");
+				    return;
+				}
+			    }
+			    match installer.test() {
+				Ok(()) => {
+				    status.is_operational = Some(true);
+				},
+				Err(s) => {
+				    status.is_operational = Some(false);
+				    println!("KataGo testing unsuccessful! {s}");
+				    return;
+				}
+			    }			
+			});
+		    }
+		    
+		    // Tune button
+		    if ui.button("(Re)Tune").clicked() {
+			self.do_katago_installer_op(|installer, status| {
+			    match installer.tune() {
+				Ok(()) => {
+				    status.is_tuned = Some(true);
+				},
+				Err(s) => {
+				    status.is_tuned = Some(false);
+				    println!("KataGo tuning unsuccessful! {s}");
+				    return;
+				}
+			    }
+			});
+		    }
+		} else {
+		    // Deactivated buttons and spinner.
+		    if ui.add_enabled(false, egui::Button::new("Re(Install)")).clicked() {}
+		    if ui.add_enabled(false, egui::Button::new("Re(Tune)")).clicked() {}
+		    ui.add(egui::Spinner::new());
+		}
+	    });
+	});
+    }
+
+    fn do_katago_installer_op<F>(&self, func: F)
+    where F: FnOnce(&KataGoInstaller, &mut KataGoInstallerStatus) + std::marker::Send + 'static {
+	// Move a copy of mutex and installer to the new
+	// thread. Main thread dropps the mutex as soon as the new
+	// thread is created. The new thread locks the mutex.
+	let installer = self.katago_installer.clone();
+	let mutex = self.katago_installer_status.clone();
+	let _handler = thread::spawn(move || {
+	    let mut status = mutex.lock().unwrap();
+	    func(&installer, &mut status);
 	});
     }
 }

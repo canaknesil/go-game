@@ -1,13 +1,13 @@
-mod view;
 mod cl_view;
 mod egui_view;
 mod model;
-mod gtp;
-mod child_process_engine;
+mod katago_installer;
+//mod gtp;
+//mod child_process_engine;
 
-use crate::view::View;
 use crate::cl_view::CLView;
 use crate::egui_view::EguiView;
+use std::path::Path;
 
 
 enum ViewType {
@@ -19,8 +19,13 @@ enum ViewType {
 fn main() {
     println!("Starting Go.");
 
-    let view_type = "egui";
+    // Setup directories to be used.
+    let katago_install_dir = Path::new("~/.cango/katago");
+    
 
+    // Start view.
+    // TODO: Consider removing cl view from project. Is it currently lack behind of development. Replace it with a debugging feature.
+    let view_type = "egui";
     let view_type = match view_type {
 	"cl" => ViewType::CL,
 	"egui" => ViewType::Egui,
@@ -32,7 +37,7 @@ fn main() {
 
     match view_type {
 	ViewType::CL => CLView::make().unwrap().run(),
-	ViewType::Egui => EguiView::make().unwrap().run()
+	ViewType::Egui => EguiView::make(katago_install_dir).unwrap().run()
     }
 
     println!("Exiting Go.");

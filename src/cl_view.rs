@@ -1,4 +1,3 @@
-use crate::view::*;
 use crate::model::{Model, Point};
 
 
@@ -7,8 +6,8 @@ pub struct CLView {
 }
 
 
-impl View for CLView {
-    fn make() -> Result<Self, String> {
+impl CLView {
+    pub fn make() -> Result<Self, String> {
 	let board_size = 13;
 	let model = Model::make_model(board_size);
 	Ok(Self {
@@ -16,14 +15,11 @@ impl View for CLView {
 	})	
     }
 
-    fn run(self) {
+    pub fn run(self) {
 	self.display_init_msg("Wellcome to Go!");
 	self.draw_board();
     }
-}
 
-
-impl CLView {
     fn display_init_msg(&self, msg: &str) {
 	println!("{msg}");
     }
