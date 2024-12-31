@@ -603,6 +603,8 @@ impl EguiView {
 	    // Status information
 	    let mut installation_status_str = String::from("KataGo installation status: ");
 	    let mut tuning_status_str = String::from("KataGo tuning status: ");
+	    let mut testing_status_str = String::from("KataGo testing status: ");
+	    
 	    if let Ok(status) = mutex.try_lock() {
 		match status.is_installed {
 		    Some(true) => { installation_status_str.push_str("installed"); },
@@ -614,12 +616,19 @@ impl EguiView {
 		    Some(false) => { tuning_status_str.push_str("not tuned"); },
 		    None => { tuning_status_str.push_str("not known"); },
 		}
+		match status.is_operational {
+		    Some(true) => { testing_status_str.push_str("successful"); },
+		    Some(false) => { testing_status_str.push_str("unsuccessful"); },
+		    None => { testing_status_str.push_str("not known"); },
+		}
 	    } else {
 		installation_status_str.push_str("not known");
 		tuning_status_str.push_str("not known");
+		testing_status_str.push_str("not known");
 	    }
 	    ui.label(installation_status_str);
 	    ui.label(tuning_status_str);
+	    ui.label(testing_status_str);
 
 	    // Buttons
 	    ui.horizontal(|ui| {
@@ -637,9 +646,21 @@ impl EguiView {
 				    return;
 				}
 			    }
+			    status.is_tuned = Some(installer.is_tuned());
+			});
+		    }
+		    
+		    // Test button
+		    if ui.button("Test").clicked() {
+			self.do_katago_installer_op(|installer, status| {
+			    // Also check if it is tuned
+			    status.is_tuned = Some(installer.is_tuned());
+			    
 			    match installer.test() {
-				Ok(()) => {
+				Ok(version) => {
 				    status.is_operational = Some(true);
+				    println!("KataGo testing successful.");
+				    println!("version = {version}");
 				},
 				Err(s) => {
 				    status.is_operational = Some(false);
@@ -649,26 +670,10 @@ impl EguiView {
 			    }			
 			});
 		    }
-		    
-		    // Tune button
-		    if ui.button("(Re)Tune").clicked() {
-			self.do_katago_installer_op(|installer, status| {
-			    match installer.tune() {
-				Ok(()) => {
-				    status.is_tuned = Some(true);
-				},
-				Err(s) => {
-				    status.is_tuned = Some(false);
-				    println!("KataGo tuning unsuccessful! {s}");
-				    return;
-				}
-			    }
-			});
-		    }
 		} else {
 		    // Deactivated buttons and spinner.
 		    if ui.add_enabled(false, egui::Button::new("Re(Install)")).clicked() {}
-		    if ui.add_enabled(false, egui::Button::new("Re(Tune)")).clicked() {}
+		    if ui.add_enabled(false, egui::Button::new("Test")).clicked() {}
 		    ui.add(egui::Spinner::new());
 		}
 	    });

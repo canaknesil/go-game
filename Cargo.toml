@@ -8,3 +8,4 @@ egui = "0.29"
 eframe = "0.29"
 reqwest = { version = "0.12", features = ["blocking"] }
 dirs = "5.0"
+zip = "2.2"

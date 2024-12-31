@@ -6,17 +6,18 @@ use std::thread;
 use std::str;
 
 
-struct ChildProcessEngine {
+pub struct ChildProcessEngine {
     id: u32,
     child: Child,
     writer_thread: thread::JoinHandle<()>,
     child_stdout: ChildStdout,
     tx_channel: Sender<String>,
+    // TODO: Implement drop trait to quit or kill the child process and threads. Implement a wrapper for child process first and than the engine.
 }
 
 
 impl ChildProcessEngine {
-    fn new(command: &str) -> Result<Self, String> {
+    pub fn new(command: &str) -> Result<Self, String> {
 	let mut args = command.split_whitespace();
 	let program = args.next().ok_or("Empty command")?;
 	let args: Vec<_> = args.collect();

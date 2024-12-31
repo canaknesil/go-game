@@ -2,8 +2,8 @@ mod cl_view;
 mod egui_view;
 mod model;
 mod katago_installer;
-//mod gtp;
-//mod child_process_engine;
+mod gtp;
+mod child_process_engine;
 
 use crate::cl_view::CLView;
 use crate::egui_view::EguiView;
