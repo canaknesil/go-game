@@ -2,12 +2,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use reqwest;
 use std::fs;
-use std::io::{self, BufRead, Read};
+use std::io::{self, BufRead};
 use std::error::Error;
 use zip::ZipArchive;
 use crate::child_process_engine::ChildProcessEngine;
 use crate::gtp::GTPEngineMinimal;
-use std::process;
+use crate::smart_child::{SmartChild};
 
 
 #[derive(Clone)]
@@ -82,6 +82,21 @@ impl KataGoInstaller {
 	}
     }
 
+    pub fn make_analysis_engine(&self) -> Result<ChildProcessEngine, String> {
+	let pi = self.get_path_info()?;
+	let exe = &pi.katago_exe;
+	let exe = exe.to_str().ok_or(format!("Cannot convert path to string: {exe:?}"))?;
+	let model = &pi.analysis_model;
+	let model = model.to_str().ok_or(format!("Cannot convert path to string: {model:?}"))?;
+	ChildProcessEngine::new(&format!("{exe} gtp -model {model}"))
+    }
+
+    pub fn make_human_engine(&self) -> Result<ChildProcessEngine, String> {
+	// TODO: Human engine
+	// For now using the analysis engine as human engine
+	self.make_analysis_engine()
+    }
+
     // fn try_lock(&self) -> Result<MutexGuard<'_, ()>, String> {
     // 	self.mutex.try_lock().map_err(|_| "Cannot acquire lock! Another operation is ongoing.".to_string())
     // }
@@ -141,21 +156,12 @@ impl KataGoInstaller {
 	let model = &pi.analysis_model;
 	let model = model.to_str().ok_or(format!("Cannot convert path to string: {model:?}"))?;
 
-	// TODO: Consider refactoring code below to a global function in child_process_engine.
-	// TODO: Consider creating a child wrapper implementing drop.
-	let command = vec![format!("{exe}"), "benchmark".to_string(), "-model".to_string(), format!("{model}")];
+	let command = format!("{exe} benchmark -model {model}");
 	println!("Running command: {command:?}");
 
-	let mut child = process::Command::new(&command[0])
-	    .args(&command[1..])
-	    .stdout(process::Stdio::piped())
-	    .stderr(process::Stdio::piped())
-	    .spawn()
-	    .map_err(|_| format!("Failed to start child process: {:?}", command))?;
-
-	let stdout = child.stdout.take().ok_or("Failed to get stdout!".to_string())?;
-	let stderr = child.stderr.take().ok_or("Failed to get stderr!".to_string())?;
-	let reader = io::BufReader::new(stdout.chain(stderr));
+	let mut child = SmartChild::from_command_str(&command)?;
+	
+	let reader = io::BufReader::new(child.take_stdout_and_stderr()?);
         for line in reader.lines() {
             match line {
                 Ok(line) => println!("{}", line),

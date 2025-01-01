@@ -16,6 +16,7 @@ pub struct EguiView {
     // execution. The view provides a second layer of protection for
     // its own purposes.
     katago_installer_status: Arc<Mutex<KataGoInstallerStatus>>,
+    // TODO: Graceful exit
 }
 
 struct Workspace {
@@ -121,7 +122,22 @@ impl EguiView {
 
     fn new_workspace(&mut self) {
 	// Make the workspace
-	let model = Model::make_model(self.new_workspace_setup.board_size);
+	let analysis_engine = match self.katago_installer.make_analysis_engine() {
+	    Ok(engine) => Some(engine),
+	    Err(s) => {
+		println!("Analysis engine couldn't be created: {s}");
+		None
+	    },
+	};
+	let human_engine = match self.katago_installer.make_human_engine() {
+	    Ok(engine) => Some(engine),
+	    Err(s) => {
+		println!("Human engine couldn't be created: {s}");
+		None
+	    },
+	};
+	
+	let model = Model::make_model(self.new_workspace_setup.board_size, analysis_engine, human_engine);
 	self.new_workspace_setup.count += 1;
 
 	let mut w = Workspace {

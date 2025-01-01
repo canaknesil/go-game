@@ -1,14 +1,16 @@
 use std::collections::VecDeque;
 use std::iter::Rev;
+use crate::child_process_engine::ChildProcessEngine;
 
 
-#[derive(Clone)]
 pub struct Model {
     board: Board,
     turn: Turn,
     history: History, // doesn't store the current board
     black_captures: i32, // number of stones that black captured
-    white_captures: i32
+    white_captures: i32,
+    analysis_engine: Option<ChildProcessEngine>,
+    human_engine: Option<ChildProcessEngine>,
 }
 
 #[derive(Clone, PartialEq)]
@@ -50,13 +52,15 @@ pub enum Turn {
 
 
 impl Model {
-    pub fn make_model(board_size: usize) -> Self {
+    pub fn make_model(board_size: usize, analysis_engine: Option<ChildProcessEngine>, human_engine: Option<ChildProcessEngine>) -> Self {
 	Self {
 	    board: Board::make_empty_board(board_size),
 	    turn: Turn::Black,
 	    history: History::new(),
 	    black_captures: 0,
-	    white_captures: 0
+	    white_captures: 0,
+	    analysis_engine: analysis_engine,
+	    human_engine: human_engine,
 	}
     }
 
@@ -197,6 +201,24 @@ impl Model {
 
     pub fn get_move_count(&self) -> usize {
 	self.history.get_move_count()
+    }
+}
+
+
+impl Clone for Model {
+    fn clone(&self) -> Self {
+	// TODO: Implement cloning the engine
+	// For now, setting engines of the new model as None.
+	println!("Cloning the engine is not implemented! New model will have None as engine.");
+	Self {
+	    board: self.board.clone(),
+	    turn: self.turn.clone(),
+	    history: self.history.clone(),
+	    black_captures: self.black_captures,
+	    white_captures: self.white_captures,
+	    analysis_engine: None,
+	    human_engine: None,
+	}
     }
 }
 

@@ -9,7 +9,7 @@ pub struct CLView {
 impl CLView {
     pub fn make() -> Result<Self, String> {
 	let board_size = 13;
-	let model = Model::make_model(board_size);
+	let model = Model::make_model(board_size, None, None);
 	Ok(Self {
 	    model
 	})	

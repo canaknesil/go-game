@@ -2,6 +2,7 @@ mod cl_view;
 mod egui_view;
 mod model;
 mod katago_installer;
+mod smart_child;
 mod gtp;
 mod child_process_engine;
 

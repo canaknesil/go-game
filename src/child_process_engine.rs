@@ -1,5 +1,6 @@
 use crate::gtp::*;
-use std::process::{Command, Stdio, Child, ChildStdout};
+use crate::smart_child::SmartChild;
+use std::process::ChildStdout;
 use std::io::{Read, Write};
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::thread;
@@ -8,30 +9,19 @@ use std::str;
 
 pub struct ChildProcessEngine {
     id: u32,
-    child: Child,
-    writer_thread: thread::JoinHandle<()>,
+    child: SmartChild,
+    writer_thread: Option<thread::JoinHandle<()>>, // writer_thread and tx_channel are declared as Option because they are taken during quit.
     child_stdout: ChildStdout,
-    tx_channel: Sender<String>,
-    // TODO: Implement drop trait to quit or kill the child process and threads. Implement a wrapper for child process first and than the engine.
+    tx_channel: Option<Sender<String>>,
 }
 
 
 impl ChildProcessEngine {
     pub fn new(command: &str) -> Result<Self, String> {
-	let mut args = command.split_whitespace();
-	let program = args.next().ok_or("Empty command")?;
-	let args: Vec<_> = args.collect();
+	let mut child = SmartChild::from_command_str(command)?;
 
-	let mut child = Command::new(program)
-	    .args(args.clone())
-	    .stdin(Stdio::piped())
-	    .stdout(Stdio::piped())
-	    .stderr(Stdio::null())
-	    .spawn()
-	    .map_err(|_| format!("Failed to start child process: {} {}", program, args.join(" ")))?;
-
-	let mut stdin = child.stdin.take().ok_or("Failed to get stdin!".to_string())?;
-	let stdout = child.stdout.take().ok_or("Failed to get stdout!".to_string())?;
+	let mut stdin = child.take_stdin()?;
+	let stdout = child.take_stdout()?;
 
 	// Writing to child with a thread in case OS I/O pipes cause a deadlock.
 	let (tx, rx): (Sender<String>, Receiver<String>) = channel();
@@ -49,10 +39,23 @@ impl ChildProcessEngine {
 	Ok(Self {
 	    id: 0,
 	    child: child,
-	    writer_thread: writer,
+	    writer_thread: Some(writer),
 	    child_stdout: stdout,
-	    tx_channel: tx,
+	    tx_channel: Some(tx),
 	})
+    }
+}
+
+
+// TODO: Experiment and understand if an empty drop implementation is necessary to ensure destruction of the smart child.
+impl Drop for ChildProcessEngine {
+    fn drop(&mut self) {
+	// Drop trait is implemented for SmartChild, to kill it when
+	// it goes out of scope. If user doesn't call quit, or
+	// execution of quit is unsuccessful, the child process is
+	// killed by the destructor.
+
+	// do nothing
     }
 }
 
@@ -67,7 +70,10 @@ impl GTPEngineRaw for ChildProcessEngine {
 	// s does not have go end with double new line, they are added here.
 	let mut s = String::from(s.trim());
 	s.push_str("\n\n");
-	self.tx_channel.send(s).map_err(|_| "Failed to send to channel!".to_string())
+	match &self.tx_channel {
+	    Some(tx) => tx.send(s).map_err(|_| "Failed to send to channel!".to_string()),
+	    None => Err("Sender is None!".to_string()),
+	}
     }
 
     fn read_from_engine(&mut self) -> Result<String, String> {
@@ -130,10 +136,19 @@ impl GTPEngineMinimal for ChildProcessEngine {
 	Ok(s.split_whitespace().map(|x| String::from(x)).collect())
     }
 
+    // Note: quit method takes ownership of self, sends quit command,
+    // terminates the writer thread, waits for the child to
+    // quit. Destructor of Self doesn't call quit, the user is
+    // expected to call quit.
+    
     fn quit(mut self) -> Result<(), String> {
 	self.send_command("quit")?;
-	drop(self.tx_channel);
-	self.writer_thread.join().map_err(|_| "Writer thread failed to join!".to_string())?;
+
+	self.tx_channel.take(); // Replace tx with None so it is dropped.
+	self.writer_thread
+	    .take().ok_or("Writer thread couldn't be taken!".to_string())?
+	    .join().map_err(|_| "Writer thread failed to join!".to_string())?;
+	
 	self.child.wait().map_err(|_| "Child process failed to exit!".to_string())?;
 	Ok(())
     }
