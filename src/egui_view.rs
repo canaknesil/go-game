@@ -16,7 +16,6 @@ pub struct EguiView {
     // execution. The view provides a second layer of protection for
     // its own purposes.
     katago_installer_status: Arc<Mutex<KataGoInstallerStatus>>,
-    // TODO: Graceful exit
 }
 
 struct Workspace {
@@ -703,6 +702,8 @@ impl EguiView {
 	// thread is created. The new thread locks the mutex.
 	let installer = self.katago_installer.clone();
 	let mutex = self.katago_installer_status.clone();
+
+	// TODO: Installer thread is detached, thus child is not killed at exit. Fix this.
 	let _handler = thread::spawn(move || {
 	    let mut status = mutex.lock().unwrap();
 	    func(&installer, &mut status);

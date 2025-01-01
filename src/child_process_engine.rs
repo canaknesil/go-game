@@ -47,19 +47,6 @@ impl ChildProcessEngine {
 }
 
 
-// TODO: Experiment and understand if an empty drop implementation is necessary to ensure destruction of the smart child.
-impl Drop for ChildProcessEngine {
-    fn drop(&mut self) {
-	// Drop trait is implemented for SmartChild, to kill it when
-	// it goes out of scope. If user doesn't call quit, or
-	// execution of quit is unsuccessful, the child process is
-	// killed by the destructor.
-
-	// do nothing
-    }
-}
-
-
 impl GTPEngineRaw for ChildProcessEngine {
     fn gen_command_id(&mut self) -> u32 {
 	self.id += 1;
