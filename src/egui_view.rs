@@ -3,7 +3,8 @@ use crate::katago_installer::*;
 use eframe::egui;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::sync::mpsc::Receiver;
+use crate::smart_thread::{self, SmartHandle};
 
 
 pub struct EguiView {
@@ -16,6 +17,7 @@ pub struct EguiView {
     // execution. The view provides a second layer of protection for
     // its own purposes.
     katago_installer_status: Arc<Mutex<KataGoInstallerStatus>>,
+    smart_handles: Vec<SmartHandle>,
 }
 
 struct Workspace {
@@ -28,7 +30,6 @@ struct Workspace {
     white_territory_score: i32,
     black_area_score: i32,
     white_area_score: i32,
-    // TODO: Mark last move
 }
 
 struct KataGoInstallerStatus {
@@ -48,6 +49,7 @@ struct NewWorkspaceSetup {
     board_size: usize,
     count: usize,
     game_mode: GameMode,
+    analysis_engine: Option<EngineType>,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -61,6 +63,11 @@ enum WorkspaceMode {
 enum GameMode {
     HumanVsHuman,
     HumanVsComputer(Turn), // turn is the human's color
+}
+
+#[derive(PartialEq)]
+enum EngineType {
+    KataGo,
 }
 
 
@@ -90,6 +97,7 @@ impl NewWorkspaceSetup {
 	    board_size: 13,
 	    count: 0,
 	    game_mode: GameMode::HumanVsHuman,
+	    analysis_engine: None,
 	}
     }
 }
@@ -111,6 +119,7 @@ impl EguiView {
 	    new_workspace_setup: NewWorkspaceSetup::default(),
 	    katago_installer: katago_installer,
 	    katago_installer_status: Arc::new(Mutex::new(katago_installer_status)),
+	    smart_handles: Vec::new(),
 	};
 	Ok(view)
     }
@@ -121,20 +130,34 @@ impl EguiView {
 
     fn new_workspace(&mut self) {
 	// Make the workspace
-	let analysis_engine = match self.katago_installer.make_analysis_engine() {
-	    Ok(engine) => Some(engine),
-	    Err(s) => {
-		println!("Analysis engine couldn't be created: {s}");
-		None
+	let analysis_engine = match self.new_workspace_setup.analysis_engine {
+	    Some(EngineType::KataGo) => match self.katago_installer.make_analysis_engine() {
+		Ok(engine) => Some(engine),
+		Err(s) => {
+		    println!("Analysis engine couldn't be created: {s}");
+		    None
+		},
 	    },
+	    None => None,
 	};
-	let human_engine = match self.katago_installer.make_human_engine() {
-	    Ok(engine) => Some(engine),
-	    Err(s) => {
-		println!("Human engine couldn't be created: {s}");
-		None
+	
+	let human_engine = match self.new_workspace_setup.game_mode {
+	    GameMode::HumanVsComputer(_turn) => match self.katago_installer.make_human_engine() {
+		Ok(engine) => Some(engine),
+		Err(s) => {
+		    println!("Human engine couldn't be created: {s}");
+		    None
+		},
 	    },
+	    GameMode::HumanVsHuman => None,
 	};
+
+	if let Some(_) = analysis_engine {
+	    println!("Anslysis engine has been created.")
+	}
+	if let Some(_) = human_engine {
+	    println!("Human engine has been created.");
+	}
 	
 	let model = Model::make_model(self.new_workspace_setup.board_size, analysis_engine, human_engine);
 	self.new_workspace_setup.count += 1;
@@ -275,7 +298,6 @@ impl EguiView {
     }
 
     fn draw_workspace_side_panel(&mut self, ctx: &egui::Context) {
-	// TODO: Don't provide some analysis features and human-vs-computer features if engine is not setup.
 	egui::SidePanel::left("side_panel").resizable(false).exact_width(200.0).show(ctx, |ui| {
 	    // Workspace mode selection
 	    if let Some(w) = self.get_workspace_mut() {
@@ -484,6 +506,15 @@ impl EguiView {
 		    }
 		}
 
+		// Draw last move
+		if let Some((x, y)) = model.get_last_move() {
+		    let x = square_b.left() + cell_size / 2.0 + x as f32 * cell_size;
+		    let y = square_b.top() + cell_size / 2.0 + y as f32 * cell_size;
+		    
+		    let center = egui::Pos2::new(x, y);
+		    painter.circle_filled(center, stone_radius / 5.0, egui::Color32::from_rgb(180, 0, 0));
+		}
+
 		// Draw area on the right of the board
 		let turn = model.get_turn();
 		let turn_stone_center = egui::Pos2::new(square_a.right() + cell_size, canvas.top() + canvas_height / 2.0);
@@ -587,15 +618,38 @@ impl EguiView {
     }
 
     fn draw_create_workspace_central_panel(&mut self, ctx: &egui::Context) {
-	// TODO: Don't provide some analysis features and human-vs-computer features if engine is not setup.
 	egui::CentralPanel::default().show(ctx, |ui| {
 	    ui.add(egui::Slider::new(&mut self.new_workspace_setup.board_size, 2..=25).text("Board size"));
 
 	    let game_mode = &mut self.new_workspace_setup.game_mode;
 	    ui.label("Game mode:");
 	    ui.radio_value(game_mode, GameMode::HumanVsHuman, "Human vs. human");
-	    ui.radio_value(game_mode, GameMode::HumanVsComputer(Turn::Black), "Human (black) vs. computer (white)");
-	    ui.radio_value(game_mode, GameMode::HumanVsComputer(Turn::White), "Human (white) vs. computer (black)");
+	    
+	    let engine_installed = if let Ok(status) = self.katago_installer_status.try_lock() {
+		status.is_installed == Some(true)
+	    } else {
+		false
+	    };
+	    if engine_installed {
+		ui.radio_value(game_mode, GameMode::HumanVsComputer(Turn::Black), "Human (black) vs. computer (white)");
+		ui.radio_value(game_mode, GameMode::HumanVsComputer(Turn::White), "Human (white) vs. computer (black)");
+	    } else {
+		ui.add_enabled_ui(false, |ui| {
+		    ui.radio_value(game_mode, GameMode::HumanVsComputer(Turn::Black), "Human (black) vs. computer (white)");
+		    ui.radio_value(game_mode, GameMode::HumanVsComputer(Turn::White), "Human (white) vs. computer (black)");
+		});		    
+	    }
+
+	    let analysis_engine = &mut self.new_workspace_setup.analysis_engine;
+	    ui.label("Analysis engine:");
+	    ui.radio_value(analysis_engine, None, "None");
+	    if engine_installed {
+		ui.radio_value(analysis_engine, Some(EngineType::KataGo), "KataGo");
+	    } else {
+		ui.add_enabled_ui(false, |ui| {
+		    ui.radio_value(analysis_engine, Some(EngineType::KataGo), "KataGo");
+		});		    
+	    }
 
 	    ui.horizontal(|ui| {
 		if ui.button("Cancel").clicked() {
@@ -613,7 +667,7 @@ impl EguiView {
 	egui::CentralPanel::default().show(ctx, |ui| {
 	    // TODO: Custom engine setup via command, save the command to config file
 
-	    let mutex = &self.katago_installer_status;
+	    let mutex = self.katago_installer_status.clone();
 
 	    // Status information
 	    let mut installation_status_str = String::from("KataGo installation status: ");
@@ -650,24 +704,25 @@ impl EguiView {
 		if let Ok(_status) = mutex.try_lock() {
 		    // Install button
 		    if ui.button("(Re)Install").clicked() {
-			self.do_katago_installer_op(|installer, status| {
-			    match installer.install() {
+			self.do_katago_installer_op(|installer, status, kill_signal_rx| {
+			    match installer.install(kill_signal_rx) {
 				Ok(()) => {
 				    status.is_installed = Some(true);
 				},
 				Err(s) => {
 				    status.is_installed = Some(false);
 				    println!("KataGo installation unsuccessful! {s}");
-				    return;
+				    return Err(format!("KataGo installation unsuccessful! {s}"));
 				}
 			    }
 			    status.is_tuned = Some(installer.is_tuned());
+			    Ok(())
 			});
 		    }
 		    
 		    // Test button
 		    if ui.button("Test").clicked() {
-			self.do_katago_installer_op(|installer, status| {
+			self.do_katago_installer_op(|installer, status, _kill_signal_rx| {
 			    // Also check if it is tuned
 			    status.is_tuned = Some(installer.is_tuned());
 			    
@@ -680,9 +735,10 @@ impl EguiView {
 				Err(s) => {
 				    status.is_operational = Some(false);
 				    println!("KataGo testing unsuccessful! {s}");
-				    return;
+				    return Err(format!("KataGo testing unsuccessful! {s}"));
 				}
-			    }			
+			    }
+			    Ok(())
 			});
 		    }
 		} else {
@@ -695,19 +751,23 @@ impl EguiView {
 	});
     }
 
-    fn do_katago_installer_op<F>(&self, func: F)
-    where F: FnOnce(&KataGoInstaller, &mut KataGoInstallerStatus) + std::marker::Send + 'static {
+    fn do_katago_installer_op<F>(&mut self, func: F)
+    where F: FnOnce(&KataGoInstaller, &mut KataGoInstallerStatus, Receiver<()>) -> Result<(), String> + std::marker::Send + 'static {
 	// Move a copy of mutex and installer to the new
 	// thread. Main thread dropps the mutex as soon as the new
 	// thread is created. The new thread locks the mutex.
 	let installer = self.katago_installer.clone();
 	let mutex = self.katago_installer_status.clone();
 
-	// TODO: Installer thread is detached, thus child is not killed at exit. Fix this.
-	let _handler = thread::spawn(move || {
+	let handle = smart_thread::spawn(move |kill_signal_rx| {
 	    let mut status = mutex.lock().unwrap();
-	    func(&installer, &mut status);
+	    let r = func(&installer, &mut status, kill_signal_rx);
+	    if let Err(ref s) = r {
+		println!("{s:?}");
+	    }
+	    r
 	});
+	self.smart_handles.push(handle);
     }
 }
 

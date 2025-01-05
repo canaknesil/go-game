@@ -24,6 +24,8 @@ struct HistoryItem {
     board: Board,
     black_captures: i32,
     white_captures: i32,
+    turn: Turn, // The color that would play given the above board position
+    gomove: (usize, usize), // The move that has been made right after the above board position
 }
 
 #[derive(Clone)]
@@ -132,6 +134,8 @@ impl Model {
 		    board: self.board.clone(),
 		    black_captures: self.black_captures,
 		    white_captures: self.white_captures,
+		    turn: self.get_turn(),
+		    gomove: (x, y),
 		});
 		self.board = new_board.clone();
 		match self.turn {
@@ -201,6 +205,14 @@ impl Model {
 
     pub fn get_move_count(&self) -> usize {
 	self.history.get_move_count()
+    }
+
+    pub fn get_last_move(&self) -> Option<(usize, usize)> {
+	if let Some(item) = self.history.last() {
+	    Some(item.gomove)
+	} else {
+	    None
+	}
     }
 }
 
@@ -466,6 +478,10 @@ impl History {
 
     fn in_reverse(&self) -> Rev<std::slice::Iter<'_, HistoryItem>> {
 	self.items.iter().rev()
+    }
+
+    fn last(&self) -> Option<&HistoryItem> {
+	self.items.last()
     }
 }
 

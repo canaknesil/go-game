@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::mpsc::Receiver;
+use std::thread;
 use reqwest;
 use std::fs;
 use std::io::{self, BufRead};
@@ -128,7 +130,7 @@ impl KataGoInstaller {
 	}
     }
 
-    pub fn install(&self) -> Result<(), String> {
+    pub fn install(&self, kill_signal_rx: Receiver<()>) -> Result<(), String> {
 	let _guard = self.lock();
 
 	println!("Installing KataGo archieve...");
@@ -141,7 +143,7 @@ impl KataGoInstaller {
 	if !self.is_installed_without_lock() {
 	    return Err("Extraction unsuccessful!".to_string());
 	}
-	self.tune()?;
+	self.tune(kill_signal_rx)?;
 	if !self.is_tuned_without_lock() {
 	    println!("Tuning unsuccessful!");
 	}
@@ -149,7 +151,7 @@ impl KataGoInstaller {
 	Ok(())
     }
 
-    fn tune(&self) -> Result<(), String> {
+    fn tune(&self, kill_signal_rx: Receiver<()>) -> Result<(), String> {
 	let pi = &self.get_path_info()?;
 	let exe = &pi.katago_exe;
 	let exe = exe.to_str().ok_or(format!("Cannot convert path to string: {exe:?}"))?;
@@ -161,17 +163,28 @@ impl KataGoInstaller {
 
 	let mut child = SmartChild::from_command_str(&command)?;
 	
-	let reader = io::BufReader::new(child.take_stdout_and_stderr()?);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => println!("{}", line),
-                Err(err) => eprintln!("Error reading line: {}", err),
-            }
-        }
+	// Reading blocks. Find a way to read non-blocking.
+	// let reader = io::BufReader::new(child.take_stdout_and_stderr()?);
+	// for line in reader.lines() {
+        //     match line {
+        //         Ok(line) => println!("{}", line),
+        //         Err(err) => eprintln!("Error reading line: {}", err),
+        //     }
+        // }
 
-	let status = child.wait().map_err(|_| "Error waiting child process!".to_string())?;
-	println!("Benchmark process exited with status: {}", status);
-	
+	loop {
+	    if let Ok(Some(status)) = child.try_wait() {
+		println!("Benchmark process exited with status: {}", status);
+		break;
+	    }
+	    if let Ok(()) = kill_signal_rx.try_recv() {
+		println!("Kill signal received before the benchmark process exited. Killing.");
+		drop(child);
+		break;
+	    }
+	    thread::sleep(std::time::Duration::from_millis(200));
+	}
+
 	Ok(())
     }
 

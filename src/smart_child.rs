@@ -2,6 +2,7 @@ use std::process::{self, Child, ChildStdin, ChildStdout, ChildStderr};
 use std::io::{Read, Chain};
 
 
+// Child that is killed when dropped. Plus, some other features.
 pub struct SmartChild {
     child: Child,
 }
@@ -46,6 +47,10 @@ impl SmartChild {
 
     pub fn wait(&mut self) -> Result<process::ExitStatus, String> {
 	self.child.wait().map_err(|_| "Error waiting child!".to_string())
+    }
+
+    pub fn try_wait(&mut self) -> Result<Option<process::ExitStatus>, String> {
+	self.child.try_wait().map_err(|_| "Error at try_wait child!".to_string())
     }
 }
 
