@@ -30,6 +30,8 @@ struct Workspace {
     white_territory_score: i32,
     black_area_score: i32,
     white_area_score: i32,
+    new_black_captures: i32,
+    new_white_captures: i32,
 }
 
 struct KataGoInstallerStatus {
@@ -86,6 +88,8 @@ impl Clone for Workspace {
 	    white_territory_score: self.white_territory_score,
 	    black_area_score: self.black_area_score,
 	    white_area_score: self.white_area_score,
+	    new_black_captures: self.new_black_captures,
+	    new_white_captures: self.new_white_captures,
 	}
     }
 }
@@ -172,6 +176,8 @@ impl EguiView {
 	    white_territory_score: 0,
 	    black_area_score: 0,
 	    white_area_score: 0,
+	    new_black_captures: 0,
+	    new_white_captures: 0,
 	};
 
 	// If computer is black, make the first move.
@@ -345,6 +351,37 @@ impl EguiView {
 			    }
 			}
 		    }
+
+		    ui.horizontal(|ui| {
+			if let Some(w) = self.get_workspace_mut() {
+			    ui.add(egui::DragValue::new(&mut w.new_black_captures).speed(0.1));
+			    if ui.button("Set black captures").clicked() {
+				let n = w.new_black_captures;
+				if let Some(model) = self.get_model_mut() {
+				    let r = model.setup_set_captures(Turn::Black, n);
+				    if let Err(s) = r {
+					println!("Model setup_set_captures unsuccessful! {s}");
+				    }
+				}
+			    }
+			}
+		    });
+
+		    ui.horizontal(|ui| {
+			if let Some(w) = self.get_workspace_mut() {
+			    ui.add(egui::DragValue::new(&mut w.new_white_captures).speed(0.1));
+			    if ui.button("Set white captures").clicked() {
+				let n = w.new_white_captures;
+				if let Some(model) = self.get_model_mut() {
+				    let r = model.setup_set_captures(Turn::White, n);
+				    if let Err(s) = r {
+					println!("Model setup_set_captures unsuccessful! {s}");
+				    }
+				}
+			    }
+			}
+		    });
+		    
 		    
 		    if let Some(w) = self.get_workspace_mut() {
 			let stone = &mut w.stone;
@@ -353,7 +390,6 @@ impl EguiView {
 			ui.radio_value(stone, Stone::White, "White");
 		    }
 		    
-		    // TODO: Setup captured stones
 		    ui.separator();
 		}
 	    }

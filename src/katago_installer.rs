@@ -4,7 +4,7 @@ use std::sync::mpsc::Receiver;
 use std::thread;
 use reqwest;
 use std::fs;
-use std::io::{self, BufRead};
+use std::io;
 use std::error::Error;
 use zip::ZipArchive;
 use crate::child_process_engine::ChildProcessEngine;

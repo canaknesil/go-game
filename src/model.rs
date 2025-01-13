@@ -111,6 +111,14 @@ impl Model {
 	r
     }
 
+    pub fn setup_set_captures(&mut self, turn: Turn, n: i32) -> Result<(), String> {
+	match turn {
+	    Turn::Black => { self.black_captures = n; },
+	    Turn::White => { self.white_captures = n; },
+	}
+	Ok(())
+    }
+
     fn reset_history_during_setup(&mut self) {
 	println!("Resetting history due to custom setup!");
 	self.history = History::new();
